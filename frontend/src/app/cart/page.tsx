@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import type { CartItem } from "@/types/cart";
 import {
+  CART_UPDATED_EVENT,
+  clearCart,
   getCartItems,
   removeCartItem,
   updateCartItemQuantity,
-  clearCart,
 } from "@/lib/cart";
 
 function formatPrice(value: number) {
@@ -17,8 +18,48 @@ function formatPrice(value: number) {
   }).format(value);
 }
 
+function subscribeCart(callback: () => void) {
+  if (typeof window === "undefined") {
+    return () => {};
+  }
+
+  window.addEventListener(CART_UPDATED_EVENT, callback);
+  window.addEventListener("storage", callback);
+
+  return () => {
+    window.removeEventListener(CART_UPDATED_EVENT, callback);
+    window.removeEventListener("storage", callback);
+  };
+}
+
+function getCartSnapshot() {
+  if (typeof window === "undefined") {
+    return "[]";
+  }
+
+  return JSON.stringify(getCartItems());
+}
+
+function getServerCartSnapshot() {
+  return "[]";
+}
+
+function useCartItems() {
+  const snapshot = useSyncExternalStore(
+    subscribeCart,
+    getCartSnapshot,
+    getServerCartSnapshot
+  );
+
+  try {
+    return JSON.parse(snapshot) as CartItem[];
+  } catch {
+    return [];
+  }
+}
+
 export default function CartPage() {
-  const [items, setItems] = useState<CartItem[]>(() => getCartItems());
+  const items = useCartItems();
 
   const subtotal = useMemo(() => {
     return items.reduce((total, item) => {
@@ -27,18 +68,15 @@ export default function CartPage() {
   }, [items]);
 
   function handleUpdateQuantity(productId: string, quantity: number) {
-    const nextCart = updateCartItemQuantity(productId, quantity);
-    setItems(nextCart);
+    updateCartItemQuantity(productId, quantity);
   }
 
   function handleRemoveItem(productId: string) {
-    const nextCart = removeCartItem(productId);
-    setItems(nextCart);
+    removeCartItem(productId);
   }
 
   function handleClearCart() {
     clearCart();
-    setItems([]);
   }
 
   return (

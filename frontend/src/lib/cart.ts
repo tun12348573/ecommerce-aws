@@ -2,6 +2,13 @@ import type { Product } from "@/types/product";
 import type { CartItem } from "@/types/cart";
 
 const CART_KEY = "aws-shop-cart";
+export const CART_UPDATED_EVENT = "cart-updated";
+
+function notifyCartChanged() {
+  if (typeof window === "undefined") return;
+
+  window.dispatchEvent(new Event(CART_UPDATED_EVENT));
+}
 
 export function getCartItems(): CartItem[] {
   if (typeof window === "undefined") return [];
@@ -21,6 +28,7 @@ export function saveCartItems(items: CartItem[]) {
   if (typeof window === "undefined") return;
 
   localStorage.setItem(CART_KEY, JSON.stringify(items));
+  notifyCartChanged();
 }
 
 export function addToCart(product: Product, quantity = 1) {
