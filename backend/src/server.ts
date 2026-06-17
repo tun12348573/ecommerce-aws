@@ -232,6 +232,45 @@ app.get("/orders/:orderId", (req, res) => {
   });
 });
 
+app.get("/admin/orders", (req, res) => {
+  return res.json({
+    data: orders,
+  });
+});
+
+app.patch("/admin/orders/:orderId/status", (req, res) => {
+  const { orderStatus } = req.body as {
+    orderStatus?: Order["orderStatus"];
+  };
+
+  const validStatuses: Order["orderStatus"][] = [
+    "PROCESSING",
+    "SHIPPING",
+    "COMPLETED",
+    "CANCELLED",
+  ];
+
+  if (!orderStatus || !validStatuses.includes(orderStatus)) {
+    return res.status(400).json({
+      message: "Invalid order status",
+    });
+  }
+
+  const order = orders.find((item) => item.orderId === req.params.orderId);
+
+  if (!order) {
+    return res.status(404).json({
+      message: "Order not found",
+    });
+  }
+
+  order.orderStatus = orderStatus;
+
+  return res.json({
+    data: order,
+  });
+});
+
 const port = 4000;
 
 app.listen(port, () => {

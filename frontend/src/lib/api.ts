@@ -32,3 +32,18 @@ export async function apiPost<TResponse, TBody>(
 
   return handleResponse<TResponse>(response);
 }
+
+export async function apiPatch<TResponse, TBody>(
+  path: string,
+  body: TBody
+): Promise<TResponse> {
+  const response = await fetch(`${API_URL}${path}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return handleResponse<TResponse>(response);
+}
