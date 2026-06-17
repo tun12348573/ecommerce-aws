@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Product } from "@/types/product";
+import { AddToCartButton } from "@/components/cart/AddToCartButton";
 
 type ProductCardProps = {
   product: Product;
@@ -52,9 +53,7 @@ export function ProductCard({ product }: ProductCardProps) {
           Còn lại: {product.stock} sản phẩm
         </div>
 
-        <button className="w-full rounded-xl bg-black px-5 py-3 text-sm font-bold text-white">
-          Thêm vào giỏ hàng
-        </button>
+        <AddToCartButton product={product} />
       </div>
     </article>
   );
