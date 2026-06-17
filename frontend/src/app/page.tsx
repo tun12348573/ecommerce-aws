@@ -1,28 +1,10 @@
 import Link from "next/link";
+import { apiGet } from "@/lib/api";
+import type { Product } from "@/types/product";
 
-const products = [
-  {
-    id: "p001",
-    name: "Áo thun basic",
-    category: "Thời trang",
-    price: 199000,
-    salePrice: 159000,
-  },
-  {
-    id: "p002",
-    name: "Quần jean nam",
-    category: "Thời trang",
-    price: 399000,
-    salePrice: 349000,
-  },
-  {
-    id: "p003",
-    name: "Giày sneaker trắng",
-    category: "Giày dép",
-    price: 599000,
-    salePrice: 499000,
-  },
-];
+type ProductsResponse = {
+  data: Product[];
+};
 
 function formatPrice(value: number) {
   return new Intl.NumberFormat("vi-VN", {
@@ -31,7 +13,10 @@ function formatPrice(value: number) {
   }).format(value);
 }
 
-export default function HomePage() {
+export default async function HomePage() {
+  const response = await apiGet<ProductsResponse>("/products");
+  const products = response.data;
+
   return (
     <main className="min-h-screen bg-gray-50 text-gray-900">
       <header className="sticky top-0 z-50 border-b bg-white/90 backdrop-blur">
@@ -132,7 +117,7 @@ export default function HomePage() {
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {products.map((product) => (
             <article
-              key={product.id}
+              key={product.productId}
               className="overflow-hidden rounded-3xl border bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-lg"
             >
               <div className="flex aspect-square items-center justify-center bg-gray-100">
@@ -148,6 +133,10 @@ export default function HomePage() {
 
                 <h3 className="mb-3 text-xl font-bold">{product.name}</h3>
 
+                <p className="mb-4 line-clamp-2 text-sm text-gray-600">
+                  {product.description}
+                </p>
+
                 <div className="mb-5 flex items-center gap-3">
                   <span className="text-xl font-extrabold text-red-600">
                     {formatPrice(product.salePrice)}
@@ -156,6 +145,10 @@ export default function HomePage() {
                   <span className="text-sm text-gray-400 line-through">
                     {formatPrice(product.price)}
                   </span>
+                </div>
+
+                <div className="mb-4 text-sm text-gray-500">
+                  Còn lại: {product.stock} sản phẩm
                 </div>
 
                 <button className="w-full rounded-xl bg-black px-5 py-3 text-sm font-bold text-white">
