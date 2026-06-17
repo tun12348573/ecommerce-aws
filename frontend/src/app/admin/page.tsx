@@ -5,7 +5,7 @@ export default function AdminDashboardPage() {
     <main className="min-h-screen bg-gray-50 text-gray-900">
       <header className="border-b bg-white">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-          <Link href="/" className="text-2xl font-bold">
+          <Link href="/admin" className="text-2xl font-bold">
             AWS Shop Admin
           </Link>
 
@@ -20,6 +20,10 @@ export default function AdminDashboardPage() {
 
             <Link href="/admin/orders" className="text-gray-600 hover:text-black">
               Đơn hàng
+            </Link>
+
+            <Link href="/admin/products" className="text-gray-600 hover:text-black">
+              Sản phẩm
             </Link>
           </nav>
         </div>
@@ -45,12 +49,15 @@ export default function AdminDashboardPage() {
             </p>
           </Link>
 
-          <div className="rounded-3xl bg-white p-6 shadow-sm opacity-60">
+          <Link
+            href="/admin/products"
+            className="rounded-3xl bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:shadow-lg"
+          >
             <h2 className="mb-2 text-xl font-bold">Quản lý sản phẩm</h2>
             <p className="text-sm text-gray-600">
-              Sẽ làm ở bước tiếp theo.
+              Thêm, sửa, xóa sản phẩm trong cửa hàng.
             </p>
-          </div>
+          </Link>
 
           <div className="rounded-3xl bg-white p-6 shadow-sm opacity-60">
             <h2 className="mb-2 text-xl font-bold">Doanh thu</h2>

@@ -47,3 +47,26 @@ export async function apiPatch<TResponse, TBody>(
 
   return handleResponse<TResponse>(response);
 }
+
+export async function apiPut<TResponse, TBody>(
+  path: string,
+  body: TBody
+): Promise<TResponse> {
+  const response = await fetch(`${API_URL}${path}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return handleResponse<TResponse>(response);
+}
+
+export async function apiDelete<TResponse>(path: string): Promise<TResponse> {
+  const response = await fetch(`${API_URL}${path}`, {
+    method: "DELETE",
+  });
+
+  return handleResponse<TResponse>(response);
+}

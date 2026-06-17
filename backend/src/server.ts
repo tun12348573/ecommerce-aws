@@ -271,6 +271,127 @@ app.patch("/admin/orders/:orderId/status", (req, res) => {
   });
 });
 
+app.get("/admin/products", (req, res) => {
+  return res.json({
+    data: products,
+  });
+});
+
+app.post("/admin/products", (req, res) => {
+  const { name, slug, category, description, price, salePrice, stock, image } =
+    req.body as Partial<Product>;
+
+  if (
+    !name ||
+    !slug ||
+    !category ||
+    !description ||
+    price === undefined ||
+    salePrice === undefined ||
+    stock === undefined
+  ) {
+    return res.status(400).json({
+      message: "Product information is required",
+    });
+  }
+
+  const existingProduct = products.find((product) => product.slug === slug);
+
+  if (existingProduct) {
+    return res.status(400).json({
+      message: "Product slug already exists",
+    });
+  }
+
+  const newProduct: Product = {
+    productId: `p${Date.now()}`,
+    name,
+    slug,
+    category,
+    description,
+    price: Number(price),
+    salePrice: Number(salePrice),
+    stock: Number(stock),
+    image: image || "https://placehold.co/600x600",
+  };
+
+  products.push(newProduct);
+
+  return res.status(201).json({
+    data: newProduct,
+  });
+});
+
+app.put("/admin/products/:productId", (req, res) => {
+  const product = products.find(
+    (item) => item.productId === req.params.productId
+  );
+
+  if (!product) {
+    return res.status(404).json({
+      message: "Product not found",
+    });
+  }
+
+  const { name, slug, category, description, price, salePrice, stock, image } =
+    req.body as Partial<Product>;
+
+  if (
+    !name ||
+    !slug ||
+    !category ||
+    !description ||
+    price === undefined ||
+    salePrice === undefined ||
+    stock === undefined
+  ) {
+    return res.status(400).json({
+      message: "Product information is required",
+    });
+  }
+
+  const existingSlug = products.find(
+    (item) => item.slug === slug && item.productId !== product.productId
+  );
+
+  if (existingSlug) {
+    return res.status(400).json({
+      message: "Product slug already exists",
+    });
+  }
+
+  product.name = name;
+  product.slug = slug;
+  product.category = category;
+  product.description = description;
+  product.price = Number(price);
+  product.salePrice = Number(salePrice);
+  product.stock = Number(stock);
+  product.image = image || "https://placehold.co/600x600";
+
+  return res.json({
+    data: product,
+  });
+});
+
+app.delete("/admin/products/:productId", (req, res) => {
+  const productIndex = products.findIndex(
+    (item) => item.productId === req.params.productId
+  );
+
+  if (productIndex === -1) {
+    return res.status(404).json({
+      message: "Product not found",
+    });
+  }
+
+  const deletedProduct = products.splice(productIndex, 1)[0];
+
+  return res.json({
+    data: deletedProduct,
+  });
+});
+
 const port = 4000;
 
 app.listen(port, () => {
