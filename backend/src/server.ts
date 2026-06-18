@@ -1,22 +1,20 @@
+import "dotenv/config";
 import express from "express";
 import cors from "cors";
+import {
+  createProduct,
+  deleteProductById,
+  getProductById,
+  getProductBySlug,
+  listProducts,
+  updateProduct,
+} from "./repositories/product.repository";
+import type { ProductInput } from "./types/product";
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
-
-type Product = {
-  productId: string;
-  name: string;
-  slug: string;
-  category: string;
-  description: string;
-  price: number;
-  salePrice: number;
-  stock: number;
-  image: string;
-};
 
 type OrderItem = {
   productId: string;
@@ -49,167 +47,199 @@ type Order = {
   createdAt: string;
 };
 
-const products: Product[] = [
-  {
-    productId: "p001",
-    name: "Áo thun basic",
-    slug: "ao-thun-basic",
-    category: "Thời trang",
-    description: "Áo thun basic chất liệu cotton, phù hợp mặc hằng ngày.",
-    price: 199000,
-    salePrice: 159000,
-    stock: 100,
-    image: "https://placehold.co/600x600",
-  },
-  {
-    productId: "p002",
-    name: "Quần jean nam",
-    slug: "quan-jean-nam",
-    category: "Thời trang",
-    description: "Quần jean nam form basic, dễ phối đồ.",
-    price: 399000,
-    salePrice: 349000,
-    stock: 50,
-    image: "https://placehold.co/600x600",
-  },
-  {
-    productId: "p003",
-    name: "Giày sneaker trắng",
-    slug: "giay-sneaker-trang",
-    category: "Giày dép",
-    description:
-      "Giày sneaker trắng phong cách tối giản, phù hợp đi học và đi chơi.",
-    price: 599000,
-    salePrice: 499000,
-    stock: 30,
-    image: "https://placehold.co/600x600",
-  },
-];
-
 const orders: Order[] = [];
+
+function parseProductInput(body: Partial<ProductInput>): ProductInput | null {
+  const { name, slug, category, description, price, salePrice, stock, image } =
+    body;
+
+  if (
+    !name ||
+    !slug ||
+    !category ||
+    !description ||
+    price === undefined ||
+    salePrice === undefined ||
+    stock === undefined
+  ) {
+    return null;
+  }
+
+  return {
+    name,
+    slug,
+    category,
+    description,
+    price: Number(price),
+    salePrice: Number(salePrice),
+    stock: Number(stock),
+    image: image || "https://placehold.co/600x600",
+  };
+}
 
 app.get("/health", (req, res) => {
   return res.json({
     status: "ok",
     service: "ecommerce-backend",
+    database: "DynamoDB",
     message: "Backend is running successfully",
   });
 });
 
-app.get("/products", (req, res) => {
-  return res.json({
-    data: products,
-  });
+app.get("/products", async (req, res) => {
+  try {
+    const products = await listProducts();
+
+    return res.json({
+      data: products,
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Cannot get products",
+    });
+  }
 });
 
-app.get("/products/:slug", (req, res) => {
-  const product = products.find((item) => item.slug === req.params.slug);
-
-  if (!product) {
-    return res.status(404).json({
-      message: "Product not found",
-    });
-  }
-
-  return res.json({
-    data: product,
-  });
-});
-
-app.post("/orders", (req, res) => {
-  const { items, customer, paymentMethod } = req.body as {
-    items?: Array<{
-      productId: string;
-      quantity: number;
-    }>;
-    customer?: CustomerInfo;
-    paymentMethod?: "COD" | "BANK_TRANSFER";
-  };
-
-  if (!items || items.length === 0) {
-    return res.status(400).json({
-      message: "Cart is empty",
-    });
-  }
-
-  if (
-    !customer ||
-    !customer.fullName ||
-    !customer.phone ||
-    !customer.email ||
-    !customer.address
-  ) {
-    return res.status(400).json({
-      message: "Customer information is required",
-    });
-  }
-
-  const orderItems: OrderItem[] = [];
-
-  for (const item of items) {
-    const product = products.find(
-      (productItem) => productItem.productId === item.productId
-    );
+app.get("/products/:slug", async (req, res) => {
+  try {
+    const product = await getProductBySlug(req.params.slug);
 
     if (!product) {
       return res.status(404).json({
-        message: `Product ${item.productId} not found`,
+        message: "Product not found",
       });
     }
 
-    if (item.quantity > product.stock) {
-      return res.status(400).json({
-        message: `${product.name} is out of stock`,
-      });
-    }
+    return res.json({
+      data: product,
+    });
+  } catch (error) {
+    console.error(error);
 
-    orderItems.push({
-      productId: product.productId,
-      name: product.name,
-      slug: product.slug,
-      price: product.price,
-      salePrice: product.salePrice,
-      quantity: item.quantity,
+    return res.status(500).json({
+      message: "Cannot get product",
     });
   }
+});
 
-  const subtotal = orderItems.reduce((total, item) => {
-    return total + item.salePrice * item.quantity;
-  }, 0);
+app.post("/orders", async (req, res) => {
+  try {
+    const { items, customer, paymentMethod } = req.body as {
+      items?: Array<{
+        productId: string;
+        quantity: number;
+      }>;
+      customer?: CustomerInfo;
+      paymentMethod?: "COD" | "BANK_TRANSFER";
+    };
 
-  const shippingFee = 30000;
-  const discount = 0;
-  const total = subtotal + shippingFee - discount;
-
-  const order: Order = {
-    orderId: `ord_${Date.now()}`,
-    customer,
-    items: orderItems,
-    subtotal,
-    shippingFee,
-    discount,
-    total,
-    paymentMethod: paymentMethod || "COD",
-    paymentStatus: "PENDING",
-    orderStatus: "PROCESSING",
-    createdAt: new Date().toISOString(),
-  };
-
-  orders.push(order);
-
-  for (const item of orderItems) {
-    const product = products.find(
-      (productItem) => productItem.productId === item.productId
-    );
-
-    if (product) {
-      product.stock = product.stock - item.quantity;
+    if (!items || items.length === 0) {
+      return res.status(400).json({
+        message: "Cart is empty",
+      });
     }
-  }
 
-  return res.status(201).json({
-    data: order,
-  });
+    if (
+      !customer ||
+      !customer.fullName ||
+      !customer.phone ||
+      !customer.email ||
+      !customer.address
+    ) {
+      return res.status(400).json({
+        message: "Customer information is required",
+      });
+    }
+
+    const orderItems: OrderItem[] = [];
+    const checkedProducts: Array<{
+      productId: string;
+      quantity: number;
+      nextStock: number;
+      input: ProductInput;
+    }> = [];
+
+    for (const item of items) {
+      const product = await getProductById(item.productId);
+
+      if (!product) {
+        return res.status(404).json({
+          message: `Product ${item.productId} not found`,
+        });
+      }
+
+      if (item.quantity > product.stock) {
+        return res.status(400).json({
+          message: `${product.name} is out of stock`,
+        });
+      }
+
+      orderItems.push({
+        productId: product.productId,
+        name: product.name,
+        slug: product.slug,
+        price: product.price,
+        salePrice: product.salePrice,
+        quantity: item.quantity,
+      });
+
+      checkedProducts.push({
+        productId: product.productId,
+        quantity: item.quantity,
+        nextStock: product.stock - item.quantity,
+        input: {
+          name: product.name,
+          slug: product.slug,
+          category: product.category,
+          description: product.description,
+          price: product.price,
+          salePrice: product.salePrice,
+          stock: product.stock - item.quantity,
+          image: product.image,
+        },
+      });
+    }
+
+    const subtotal = orderItems.reduce((total, item) => {
+      return total + item.salePrice * item.quantity;
+    }, 0);
+
+    const shippingFee = 30000;
+    const discount = 0;
+    const total = subtotal + shippingFee - discount;
+
+    const order: Order = {
+      orderId: `ord_${Date.now()}`,
+      customer,
+      items: orderItems,
+      subtotal,
+      shippingFee,
+      discount,
+      total,
+      paymentMethod: paymentMethod || "COD",
+      paymentStatus: "PENDING",
+      orderStatus: "PROCESSING",
+      createdAt: new Date().toISOString(),
+    };
+
+    orders.push(order);
+
+    for (const item of checkedProducts) {
+      await updateProduct(item.productId, item.input);
+    }
+
+    return res.status(201).json({
+      data: order,
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Cannot create order",
+    });
+  }
 });
 
 app.get("/orders", (req, res) => {
@@ -271,125 +301,115 @@ app.patch("/admin/orders/:orderId/status", (req, res) => {
   });
 });
 
-app.get("/admin/products", (req, res) => {
-  return res.json({
-    data: products,
-  });
+app.get("/admin/products", async (req, res) => {
+  try {
+    const products = await listProducts();
+
+    return res.json({
+      data: products,
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Cannot get admin products",
+    });
+  }
 });
 
-app.post("/admin/products", (req, res) => {
-  const { name, slug, category, description, price, salePrice, stock, image } =
-    req.body as Partial<Product>;
+app.post("/admin/products", async (req, res) => {
+  try {
+    const productInput = parseProductInput(req.body);
 
-  if (
-    !name ||
-    !slug ||
-    !category ||
-    !description ||
-    price === undefined ||
-    salePrice === undefined ||
-    stock === undefined
-  ) {
-    return res.status(400).json({
-      message: "Product information is required",
+    if (!productInput) {
+      return res.status(400).json({
+        message: "Product information is required",
+      });
+    }
+
+    const existingProduct = await getProductBySlug(productInput.slug);
+
+    if (existingProduct) {
+      return res.status(400).json({
+        message: "Product slug already exists",
+      });
+    }
+
+    const product = await createProduct(productInput);
+
+    return res.status(201).json({
+      data: product,
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Cannot create product",
     });
   }
-
-  const existingProduct = products.find((product) => product.slug === slug);
-
-  if (existingProduct) {
-    return res.status(400).json({
-      message: "Product slug already exists",
-    });
-  }
-
-  const newProduct: Product = {
-    productId: `p${Date.now()}`,
-    name,
-    slug,
-    category,
-    description,
-    price: Number(price),
-    salePrice: Number(salePrice),
-    stock: Number(stock),
-    image: image || "https://placehold.co/600x600",
-  };
-
-  products.push(newProduct);
-
-  return res.status(201).json({
-    data: newProduct,
-  });
 });
 
-app.put("/admin/products/:productId", (req, res) => {
-  const product = products.find(
-    (item) => item.productId === req.params.productId
-  );
+app.put("/admin/products/:productId", async (req, res) => {
+  try {
+    const productInput = parseProductInput(req.body);
 
-  if (!product) {
-    return res.status(404).json({
-      message: "Product not found",
+    if (!productInput) {
+      return res.status(400).json({
+        message: "Product information is required",
+      });
+    }
+
+    const existingSlugProduct = await getProductBySlug(productInput.slug);
+
+    if (
+      existingSlugProduct &&
+      existingSlugProduct.productId !== req.params.productId
+    ) {
+      return res.status(400).json({
+        message: "Product slug already exists",
+      });
+    }
+
+    const product = await updateProduct(req.params.productId, productInput);
+
+    if (!product) {
+      return res.status(404).json({
+        message: "Product not found",
+      });
+    }
+
+    return res.json({
+      data: product,
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Cannot update product",
     });
   }
-
-  const { name, slug, category, description, price, salePrice, stock, image } =
-    req.body as Partial<Product>;
-
-  if (
-    !name ||
-    !slug ||
-    !category ||
-    !description ||
-    price === undefined ||
-    salePrice === undefined ||
-    stock === undefined
-  ) {
-    return res.status(400).json({
-      message: "Product information is required",
-    });
-  }
-
-  const existingSlug = products.find(
-    (item) => item.slug === slug && item.productId !== product.productId
-  );
-
-  if (existingSlug) {
-    return res.status(400).json({
-      message: "Product slug already exists",
-    });
-  }
-
-  product.name = name;
-  product.slug = slug;
-  product.category = category;
-  product.description = description;
-  product.price = Number(price);
-  product.salePrice = Number(salePrice);
-  product.stock = Number(stock);
-  product.image = image || "https://placehold.co/600x600";
-
-  return res.json({
-    data: product,
-  });
 });
 
-app.delete("/admin/products/:productId", (req, res) => {
-  const productIndex = products.findIndex(
-    (item) => item.productId === req.params.productId
-  );
+app.delete("/admin/products/:productId", async (req, res) => {
+  try {
+    const product = await deleteProductById(req.params.productId);
 
-  if (productIndex === -1) {
-    return res.status(404).json({
-      message: "Product not found",
+    if (!product) {
+      return res.status(404).json({
+        message: "Product not found",
+      });
+    }
+
+    return res.json({
+      data: product,
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Cannot delete product",
     });
   }
-
-  const deletedProduct = products.splice(productIndex, 1)[0];
-
-  return res.json({
-    data: deletedProduct,
-  });
 });
 
 const port = 4000;

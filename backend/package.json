@@ -5,14 +5,19 @@
   "main": "index.js",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
-    "build": "tsc"
+    "build": "tsc",
+    "test:dynamodb": "ts-node-dev --transpile-only src/test-dynamodb.ts",
+    "seed:products": "ts-node-dev --transpile-only src/seed-products.ts"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1071.0",
+    "@aws-sdk/lib-dynamodb": "^3.1071.0",
     "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
     "express": "^5.2.1"
   },
   "devDependencies": {
