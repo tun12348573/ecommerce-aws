@@ -9,45 +9,25 @@ import {
   listProducts,
   updateProduct,
 } from "./repositories/product.repository";
+import {
+  createOrder,
+  getOrderById,
+  listOrders,
+  updateOrderStatus,
+} from "./repositories/order.repository";
 import type { ProductInput } from "./types/product";
+import type {
+  CustomerInfo,
+  Order,
+  OrderItem,
+  OrderStatus,
+  PaymentMethod,
+} from "./types/order";
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
-
-type OrderItem = {
-  productId: string;
-  name: string;
-  slug: string;
-  price: number;
-  salePrice: number;
-  quantity: number;
-};
-
-type CustomerInfo = {
-  fullName: string;
-  phone: string;
-  email: string;
-  address: string;
-  note?: string;
-};
-
-type Order = {
-  orderId: string;
-  customer: CustomerInfo;
-  items: OrderItem[];
-  subtotal: number;
-  shippingFee: number;
-  discount: number;
-  total: number;
-  paymentMethod: "COD" | "BANK_TRANSFER";
-  paymentStatus: "PENDING" | "PAID";
-  orderStatus: "PROCESSING" | "SHIPPING" | "COMPLETED" | "CANCELLED";
-  createdAt: string;
-};
-
-const orders: Order[] = [];
 
 function parseProductInput(body: Partial<ProductInput>): ProductInput | null {
   const { name, slug, category, description, price, salePrice, stock, image } =
@@ -132,7 +112,7 @@ app.post("/orders", async (req, res) => {
         quantity: number;
       }>;
       customer?: CustomerInfo;
-      paymentMethod?: "COD" | "BANK_TRANSFER";
+      paymentMethod?: PaymentMethod;
     };
 
     if (!items || items.length === 0) {
@@ -154,10 +134,9 @@ app.post("/orders", async (req, res) => {
     }
 
     const orderItems: OrderItem[] = [];
-    const checkedProducts: Array<{
+
+    const productsToUpdate: Array<{
       productId: string;
-      quantity: number;
-      nextStock: number;
       input: ProductInput;
     }> = [];
 
@@ -167,6 +146,12 @@ app.post("/orders", async (req, res) => {
       if (!product) {
         return res.status(404).json({
           message: `Product ${item.productId} not found`,
+        });
+      }
+
+      if (item.quantity <= 0) {
+        return res.status(400).json({
+          message: "Invalid product quantity",
         });
       }
 
@@ -185,10 +170,8 @@ app.post("/orders", async (req, res) => {
         quantity: item.quantity,
       });
 
-      checkedProducts.push({
+      productsToUpdate.push({
         productId: product.productId,
-        quantity: item.quantity,
-        nextStock: product.stock - item.quantity,
         input: {
           name: product.name,
           slug: product.slug,
@@ -209,6 +192,7 @@ app.post("/orders", async (req, res) => {
     const shippingFee = 30000;
     const discount = 0;
     const total = subtotal + shippingFee - discount;
+    const now = new Date().toISOString();
 
     const order: Order = {
       orderId: `ord_${Date.now()}`,
@@ -221,13 +205,14 @@ app.post("/orders", async (req, res) => {
       paymentMethod: paymentMethod || "COD",
       paymentStatus: "PENDING",
       orderStatus: "PROCESSING",
-      createdAt: new Date().toISOString(),
+      createdAt: now,
+      updatedAt: now,
     };
 
-    orders.push(order);
+    await createOrder(order);
 
-    for (const item of checkedProducts) {
-      await updateProduct(item.productId, item.input);
+    for (const product of productsToUpdate) {
+      await updateProduct(product.productId, product.input);
     }
 
     return res.status(201).json({
@@ -242,63 +227,102 @@ app.post("/orders", async (req, res) => {
   }
 });
 
-app.get("/orders", (req, res) => {
-  return res.json({
-    data: orders,
-  });
-});
+app.get("/orders", async (req, res) => {
+  try {
+    const orders = await listOrders();
 
-app.get("/orders/:orderId", (req, res) => {
-  const order = orders.find((item) => item.orderId === req.params.orderId);
+    return res.json({
+      data: orders,
+    });
+  } catch (error) {
+    console.error(error);
 
-  if (!order) {
-    return res.status(404).json({
-      message: "Order not found",
+    return res.status(500).json({
+      message: "Cannot get orders",
     });
   }
-
-  return res.json({
-    data: order,
-  });
 });
 
-app.get("/admin/orders", (req, res) => {
-  return res.json({
-    data: orders,
-  });
+app.get("/orders/:orderId", async (req, res) => {
+  try {
+    const order = await getOrderById(req.params.orderId);
+
+    if (!order) {
+      return res.status(404).json({
+        message: "Order not found",
+      });
+    }
+
+    return res.json({
+      data: order,
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Cannot get order",
+    });
+  }
 });
 
-app.patch("/admin/orders/:orderId/status", (req, res) => {
-  const { orderStatus } = req.body as {
-    orderStatus?: Order["orderStatus"];
-  };
+app.get("/admin/orders", async (req, res) => {
+  try {
+    const orders = await listOrders();
 
-  const validStatuses: Order["orderStatus"][] = [
-    "PROCESSING",
-    "SHIPPING",
-    "COMPLETED",
-    "CANCELLED",
-  ];
+    return res.json({
+      data: orders,
+    });
+  } catch (error) {
+    console.error(error);
 
-  if (!orderStatus || !validStatuses.includes(orderStatus)) {
-    return res.status(400).json({
-      message: "Invalid order status",
+    return res.status(500).json({
+      message: "Cannot get admin orders",
     });
   }
+});
 
-  const order = orders.find((item) => item.orderId === req.params.orderId);
+app.patch("/admin/orders/:orderId/status", async (req, res) => {
+  try {
+    const { orderStatus } = req.body as {
+      orderStatus?: OrderStatus;
+    };
 
-  if (!order) {
-    return res.status(404).json({
-      message: "Order not found",
+    const validStatuses: OrderStatus[] = [
+      "PROCESSING",
+      "SHIPPING",
+      "COMPLETED",
+      "CANCELLED",
+    ];
+
+    if (!orderStatus || !validStatuses.includes(orderStatus)) {
+      return res.status(400).json({
+        message: "Invalid order status",
+      });
+    }
+
+    const existingOrder = await getOrderById(req.params.orderId);
+
+    if (!existingOrder) {
+      return res.status(404).json({
+        message: "Order not found",
+      });
+    }
+
+    const updatedOrder = await updateOrderStatus(
+      req.params.orderId,
+      orderStatus
+    );
+
+    return res.json({
+      data: updatedOrder,
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Cannot update order status",
     });
   }
-
-  order.orderStatus = orderStatus;
-
-  return res.json({
-    data: order,
-  });
 });
 
 app.get("/admin/products", async (req, res) => {
