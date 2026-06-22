@@ -1,83 +1,53 @@
+"use client";
+
 import Link from "next/link";
+import { Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 
-type CheckoutSuccessPageProps = {
-  searchParams: Promise<{
-    orderId?: string;
-  }>;
-};
+function CheckoutSuccessContent() {
+const searchParams = useSearchParams();
+const orderId = searchParams.get("orderId");
 
-export default async function CheckoutSuccessPage({
-  searchParams,
-}: CheckoutSuccessPageProps) {
-  const { orderId } = await searchParams;
+return ( <main className="mx-auto flex min-h-screen max-w-3xl items-center px-6 py-12"> <section className="w-full rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm"> <p className="text-sm font-semibold text-emerald-600">
+ĐẶT HÀNG THÀNH CÔNG </p>
 
-  return (
-    <main className="min-h-screen bg-gray-50 text-gray-900">
-      <header className="border-b bg-white">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-          <Link href="/" className="text-2xl font-bold">
-            AWS Shop
-          </Link>
+    <h1 className="mt-3 text-3xl font-bold text-slate-900">
+      Cảm ơn bạn đã đặt hàng
+    </h1>
 
-          <nav className="hidden items-center gap-8 text-sm font-medium md:flex">
-            <Link href="/" className="text-gray-600 hover:text-black">
-              Trang chủ
-            </Link>
+    <p className="mt-4 text-slate-600">
+      Đơn hàng của bạn đã được ghi nhận. Chúng tôi sẽ liên hệ để xác nhận
+      và giao hàng trong thời gian sớm nhất.
+    </p>
 
-            <Link href="/products" className="text-gray-600 hover:text-black">
-              Sản phẩm
-            </Link>
+    {orderId ? (
+      <div className="mt-6 rounded-xl bg-slate-50 px-5 py-4">
+        <p className="text-sm text-slate-500">Mã đơn hàng</p>
 
-            <Link href="/cart" className="text-gray-600 hover:text-black">
-              Giỏ hàng
-            </Link>
-          </nav>
-        </div>
-      </header>
+        <p className="mt-1 break-all font-mono text-sm font-semibold text-slate-900">
+          {orderId}
+        </p>
+      </div>
+    ) : null}
 
-      <section className="mx-auto max-w-3xl px-6 py-20">
-        <div className="rounded-3xl bg-white p-10 text-center shadow-sm">
-          <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-green-100 text-3xl">
-            ✓
-          </div>
+    <Link
+      href="/products"
+      className="mt-8 inline-flex rounded-lg bg-slate-900 px-5 py-3 font-semibold text-white transition hover:bg-slate-700"
+    >
+      Tiếp tục mua sắm
+    </Link>
+  </section>
+</main>
 
-          <p className="mb-3 text-sm font-bold uppercase text-blue-600">
-            Đặt hàng thành công
-          </p>
 
-          <h1 className="mb-4 text-4xl font-extrabold">
-            Cảm ơn bạn đã mua hàng
-          </h1>
+);
+}
 
-          <p className="mb-6 text-gray-600">
-            Đơn hàng của bạn đã được tạo thành công. Shop sẽ sớm liên hệ để xác
-            nhận và giao hàng.
-          </p>
-
-          {orderId ? (
-            <div className="mb-8 rounded-2xl bg-gray-50 p-5">
-              <p className="text-sm text-gray-600">Mã đơn hàng</p>
-              <p className="text-xl font-extrabold">{orderId}</p>
-            </div>
-          ) : null}
-
-          <div className="flex flex-col justify-center gap-3 sm:flex-row">
-            <Link
-              href="/products"
-              className="rounded-xl bg-black px-6 py-3 text-sm font-bold text-white"
-            >
-              Tiếp tục mua sắm
-            </Link>
-
-            <Link
-              href="/"
-              className="rounded-xl border border-gray-300 px-6 py-3 text-sm font-bold"
-            >
-              Về trang chủ
-            </Link>
-          </div>
-        </div>
-      </section>
-    </main>
-  );
+export default function CheckoutSuccessPage() {
+return (
+<Suspense
+fallback={ <main className="mx-auto flex min-h-screen max-w-3xl items-center justify-center px-6"> <p className="text-sm text-slate-500">Đang tải thông tin đơn hàng...</p> </main>
+}
+> <CheckoutSuccessContent /> </Suspense>
+);
 }

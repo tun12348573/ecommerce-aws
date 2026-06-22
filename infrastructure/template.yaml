@@ -138,6 +138,123 @@ Resources:
         Sourcemap: true
         Minify: false
 
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+
+  FrontendOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "${AWS::StackName}-frontend-oac"
+        Description: CloudFront access control for private frontend S3 bucket
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  FrontendUrlRewriteFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Sub "${AWS::StackName}-url-rewrite"
+      AutoPublish: true
+
+      FunctionConfig:
+        Comment: Rewrite static export routes to index.html
+        Runtime: cloudfront-js-2.0
+
+      FunctionCode: |
+        async function handler(event) {
+          var request = event.request;
+          var uri = request.uri;
+
+          if (uri.endsWith("/")) {
+            request.uri += "index.html";
+          } else if (!uri.includes(".")) {
+            request.uri += "/index.html";
+          }
+
+          return request;
+        }
+
+  FrontendDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: Ecommerce AWS static frontend
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        IPV6Enabled: true
+
+        Origins:
+          - Id: FrontendS3Origin
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt FrontendOriginAccessControl.Id
+
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+
+        DefaultCacheBehavior:
+          TargetOriginId: FrontendS3Origin
+          ViewerProtocolPolicy: redirect-to-https
+
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+
+          CachedMethods:
+            - GET
+            - HEAD
+
+          Compress: true
+
+          ForwardedValues:
+            QueryString: false
+
+            Cookies:
+              Forward: none
+
+          FunctionAssociations:
+            - EventType: viewer-request
+              FunctionARN: !GetAtt FrontendUrlRewriteFunction.FunctionMetadata.FunctionARN
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+
+      PolicyDocument:
+        Version: "2012-10-17"
+
+        Statement:
+          - Sid: AllowCloudFrontReadOnly
+
+            Effect: Allow
+
+            Principal:
+              Service: cloudfront.amazonaws.com
+
+            Action:
+              - s3:GetObject
+
+            Resource: !Sub "${FrontendBucket.Arn}/*"
+
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${FrontendDistribution}"
+
 Outputs:
   ApiUrl:
     Description: API Gateway endpoint
@@ -154,3 +271,15 @@ Outputs:
   AdminUserPoolIssuer:
     Description: Cognito JWT issuer URL
     Value: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${AdminUserPool}"
+
+  FrontendBucketName:
+    Description: Private S3 bucket storing the static frontend files
+    Value: !Ref FrontendBucket
+
+  FrontendDistributionId:
+    Description: CloudFront distribution ID for the frontend
+    Value: !Ref FrontendDistribution
+
+  WebsiteUrl:
+    Description: Public CloudFront URL for the ecommerce website
+    Value: !Sub "https://${FrontendDistribution.DomainName}"

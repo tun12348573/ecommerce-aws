@@ -3,6 +3,19 @@ import { notFound } from "next/navigation";
 import { apiGet } from "@/lib/api";
 import type { Product } from "@/types/product";
 
+type ProductsResponse = {
+data: Product[];
+};
+
+export async function generateStaticParams() {
+const response = await apiGet<ProductsResponse>("/products");
+
+return response.data.map((product) => ({
+slug: product.slug,
+}));
+}
+
+
 type ProductResponse = {
   data: Product;
 };
