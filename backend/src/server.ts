@@ -29,10 +29,12 @@ import type {
   PaymentMethod,
 } from "./types/order";
 
-const app = express();
+export const app = express();
 
 app.use(cors());
 app.use(express.json());
+
+
 
 type CheckoutItemInput = {
   productId?: unknown;
@@ -291,47 +293,10 @@ app.post("/orders", async (req, res) => {
   }
 });
 
-app.get("/orders", async (req, res) => {
-  try {
-    const orders = await listOrders();
-
-    return res.json({
-      data: orders,
-    });
-  } catch (error) {
-    console.error(error);
-
-    return res.status(500).json({
-      message: "Cannot get orders",
-    });
-  }
-});
-
-app.get("/orders/:orderId", async (req, res) => {
-  try {
-    const order = await getOrderById(req.params.orderId);
-
-    if (!order) {
-      return res.status(404).json({
-        message: "Order not found",
-      });
-    }
-
-    return res.json({
-      data: order,
-    });
-  } catch (error) {
-    console.error(error);
-
-    return res.status(500).json({
-      message: "Cannot get order",
-    });
-  }
-});
-
 // =========================
 // Admin Order APIs
 // =========================
+
 
 app.get("/admin/orders", async (req, res) => {
   try {
@@ -508,9 +473,13 @@ app.delete("/admin/products/:productId", async (req, res) => {
   }
 });
 
-const port = 4000;
+if (require.main === module) {
+  const port = Number(process.env.PORT || 4000);
 
-app.listen(port, () => {
-  console.log(`Backend running at http://localhost:${port}`);
-});
+  app.listen(port, () => {
+    console.log(`Backend running at http://localhost:${port}`);
+  });
+}
+
+
 

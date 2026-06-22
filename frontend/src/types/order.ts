@@ -2,6 +2,14 @@ import type { CartItem } from "@/types/cart";
 
 export type PaymentMethod = "COD" | "BANK_TRANSFER";
 
+export type PaymentStatus = "PENDING" | "PAID";
+
+export type OrderStatus =
+  | "PROCESSING"
+  | "SHIPPING"
+  | "COMPLETED"
+  | "CANCELLED";
+
 export type CheckoutCustomer = {
   fullName: string;
   phone: string;
@@ -23,14 +31,18 @@ export type Order = {
   orderId: string;
   customer: CheckoutCustomer;
   items: OrderItem[];
+
   subtotal: number;
   shippingFee: number;
   discount: number;
   total: number;
+
   paymentMethod: PaymentMethod;
-  paymentStatus: "PENDING" | "PAID";
-  orderStatus: "PROCESSING" | "SHIPPING" | "COMPLETED" | "CANCELLED";
+  paymentStatus: PaymentStatus;
+  orderStatus: OrderStatus;
+
   createdAt: string;
+  updatedAt?: string;
 };
 
 export type CreateOrderRequest = {
@@ -42,3 +54,4 @@ export type CreateOrderRequest = {
 export type OrderResponse = {
   data: Order;
 };
+

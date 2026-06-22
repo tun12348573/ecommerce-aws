@@ -27,6 +27,7 @@ export async function listOrders(): Promise<Order[]> {
   });
 }
 
+
 export async function getOrderById(orderId: string): Promise<Order | null> {
   const result = await docClient.send(
     new GetCommand({

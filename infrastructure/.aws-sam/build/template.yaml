@@ -1,0 +1,140 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Ecommerce AWS backend with Cognito JWT admin authentication
+Parameters:
+  ProductsTableName:
+    Type: String
+    Default: EcommerceProducts
+  OrdersTableName:
+    Type: String
+    Default: EcommerceOrders
+Resources:
+  AdminUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: ecommerce-aws-admin-users
+      AliasAttributes:
+      - email
+      AutoVerifiedAttributes:
+      - email
+      UsernameConfiguration:
+        CaseSensitive: false
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true
+      MfaConfiguration: 'OFF'
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+          TemporaryPasswordValidityDays: 7
+  AdminUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: ecommerce-aws-admin-web
+      UserPoolId:
+        Ref: AdminUserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+      - ALLOW_USER_PASSWORD_AUTH
+      - ALLOW_USER_SRP_AUTH
+      - ALLOW_REFRESH_TOKEN_AUTH
+      PreventUserExistenceErrors: ENABLED
+  EcommerceHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: prod
+      Auth:
+        Authorizers:
+          AdminJwtAuthorizer:
+            IdentitySource: $request.header.Authorization
+            JwtConfiguration:
+              issuer:
+                Fn::Sub: https://cognito-idp.${AWS::Region}.amazonaws.com/${AdminUserPool}
+              audience:
+              - Ref: AdminUserPoolClient
+  EcommerceBackendFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: EcommerceBackendFunction
+      Handler: lambda.handler
+      Runtime: nodejs22.x
+      Architectures:
+      - arm64
+      MemorySize: 256
+      Timeout: 10
+      Environment:
+        Variables:
+          PRODUCTS_TABLE:
+            Ref: ProductsTableName
+          ORDERS_TABLE:
+            Ref: OrdersTableName
+          NODE_OPTIONS: ' --enable-source-maps'
+      Policies:
+      - Statement:
+          Effect: Allow
+          Action:
+          - dynamodb:GetItem
+          - dynamodb:PutItem
+          - dynamodb:UpdateItem
+          - dynamodb:DeleteItem
+          - dynamodb:Query
+          - dynamodb:Scan
+          - dynamodb:TransactWriteItems
+          Resource:
+          - Fn::Sub: arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ProductsTableName}
+          - Fn::Sub: arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ProductsTableName}/index/*
+          - Fn::Sub: arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${OrdersTableName}
+      Events:
+        PublicApi:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: EcommerceHttpApi
+            Path: /{proxy+}
+            Method: ANY
+        AdminApi:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: EcommerceHttpApi
+            Path: /admin/{proxy+}
+            Method: ANY
+            Auth:
+              Authorizer: AdminJwtAuthorizer
+        AdminCorsPreflight:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: EcommerceHttpApi
+            Path: /admin/{proxy+}
+            Method: OPTIONS
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+        - src/lambda.ts
+        Format: cjs
+        Minify: false
+        Sourcemap: true
+        Target: es2020
+      SamResourceId: EcommerceBackendFunction
+Outputs:
+  ApiUrl:
+    Description: API Gateway endpoint
+    Value:
+      Fn::Sub: https://${EcommerceHttpApi}.execute-api.${AWS::Region}.amazonaws.com/prod
+  AdminUserPoolId:
+    Description: Cognito admin user pool ID
+    Value:
+      Ref: AdminUserPool
+  AdminUserPoolClientId:
+    Description: Cognito admin app client ID
+    Value:
+      Ref: AdminUserPoolClient
+  AdminUserPoolIssuer:
+    Description: Cognito JWT issuer URL
+    Value:
+      Fn::Sub: https://cognito-idp.${AWS::Region}.amazonaws.com/${AdminUserPool}

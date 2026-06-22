@@ -1,72 +1,161 @@
+"use client";
+
 import Link from "next/link";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+
+import { AdminGuard } from "@/components/admin/AdminGuard";
+import {
+  getAdminUsername,
+  signOutAdmin,
+} from "@/lib/admin-auth";
+import { adminGet } from "@/lib/admin-api";
+import type { Order } from "@/types/order";
+
+type OrdersResponse = {
+  data: Order[];
+};
+
+function AdminDashboardContent() {
+  const router = useRouter();
+
+  const [orderCount, setOrderCount] = useState<number | null>(null);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  const adminUsername = getAdminUsername();
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadDashboard() {
+      try {
+        const response = await adminGet<OrdersResponse>("/admin/orders");
+
+        if (isMounted) {
+          setOrderCount(response.data.length);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setErrorMessage(
+            error instanceof Error
+              ? error.message
+              : "Không thể kết nối Admin API."
+          );
+        }
+      }
+    }
+
+    void loadDashboard();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  function handleSignOut() {
+    signOutAdmin();
+    router.replace("/admin/login");
+  }
+
+  return (
+    <main className="mx-auto min-h-screen max-w-7xl px-6 py-10">
+      <header className="flex flex-col gap-5 border-b border-slate-200 pb-6 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-semibold text-slate-500">
+            ECOMMERCE AWS ADMIN
+          </p>
+
+          <h1 className="mt-1 text-3xl font-bold text-slate-900">
+            Trang quản trị
+          </h1>
+
+          <p className="mt-2 text-sm text-slate-600">
+            Đăng nhập với tài khoản: {adminUsername || "admin"}
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleSignOut}
+          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+        >
+          Đăng xuất
+        </button>
+      </header>
+
+      <section className="mt-8 grid gap-5 md:grid-cols-3">
+        <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <p className="text-sm font-medium text-slate-500">
+            Kết nối Admin API
+          </p>
+
+          <p className="mt-3 text-2xl font-bold text-emerald-600">
+            {errorMessage ? "Không thành công" : "Đã xác thực"}
+          </p>
+
+          <p className="mt-2 text-sm text-slate-600">
+            JWT Cognito đang được gửi đến API Gateway.
+          </p>
+        </article>
+
+        <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <p className="text-sm font-medium text-slate-500">
+            Tổng đơn hàng
+          </p>
+
+          <p className="mt-3 text-3xl font-bold text-slate-900">
+            {orderCount === null ? "..." : orderCount}
+          </p>
+
+          <p className="mt-2 text-sm text-slate-600">
+            Dữ liệu lấy trực tiếp từ API AWS.
+          </p>
+        </article>
+
+        <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <p className="text-sm font-medium text-slate-500">
+            Trạng thái bảo mật
+          </p>
+
+          <p className="mt-3 text-2xl font-bold text-slate-900">
+            Cognito JWT
+          </p>
+
+          <p className="mt-2 text-sm text-slate-600">
+            Route admin không còn dùng Admin API Key.
+          </p>
+        </article>
+      </section>
+
+      {errorMessage ? (
+        <p className="mt-6 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+          {errorMessage}
+        </p>
+      ) : null}
+
+      <section className="mt-8 flex flex-wrap gap-3">
+        <Link
+          href="/admin/orders"
+          className="rounded-lg bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-700"
+        >
+          Quản lý đơn hàng
+        </Link>
+
+        <Link
+          href="/admin/products"
+          className="rounded-lg border border-slate-300 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+        >
+          Quản lý sản phẩm
+        </Link>
+      </section>
+    </main>
+  );
+}
 
 export default function AdminDashboardPage() {
   return (
-    <main className="min-h-screen bg-gray-50 text-gray-900">
-      <header className="border-b bg-white">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-          <Link href="/admin" className="text-2xl font-bold">
-            AWS Shop Admin
-          </Link>
-
-          <nav className="hidden items-center gap-8 text-sm font-medium md:flex">
-            <Link href="/" className="text-gray-600 hover:text-black">
-              Website
-            </Link>
-
-            <Link href="/admin" className="text-black">
-              Dashboard
-            </Link>
-
-            <Link href="/admin/orders" className="text-gray-600 hover:text-black">
-              Đơn hàng
-            </Link>
-
-            <Link href="/admin/products" className="text-gray-600 hover:text-black">
-              Sản phẩm
-            </Link>
-          </nav>
-        </div>
-      </header>
-
-      <section className="mx-auto max-w-7xl px-6 py-12">
-        <div className="mb-8">
-          <p className="mb-3 text-sm font-bold uppercase text-blue-600">
-            Admin
-          </p>
-
-          <h1 className="text-4xl font-extrabold">Dashboard quản trị</h1>
-        </div>
-
-        <div className="grid gap-6 md:grid-cols-3">
-          <Link
-            href="/admin/orders"
-            className="rounded-3xl bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:shadow-lg"
-          >
-            <h2 className="mb-2 text-xl font-bold">Quản lý đơn hàng</h2>
-            <p className="text-sm text-gray-600">
-              Xem đơn hàng và cập nhật trạng thái xử lý.
-            </p>
-          </Link>
-
-          <Link
-            href="/admin/products"
-            className="rounded-3xl bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:shadow-lg"
-          >
-            <h2 className="mb-2 text-xl font-bold">Quản lý sản phẩm</h2>
-            <p className="text-sm text-gray-600">
-              Thêm, sửa, xóa sản phẩm trong cửa hàng.
-            </p>
-          </Link>
-
-          <div className="rounded-3xl bg-white p-6 shadow-sm opacity-60">
-            <h2 className="mb-2 text-xl font-bold">Doanh thu</h2>
-            <p className="text-sm text-gray-600">
-              Sẽ làm sau khi có database thật.
-            </p>
-          </div>
-        </div>
-      </section>
-    </main>
+    <AdminGuard>
+      <AdminDashboardContent />
+    </AdminGuard>
   );
 }
