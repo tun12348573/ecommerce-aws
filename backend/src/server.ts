@@ -25,6 +25,10 @@ import {
   updateOrderStatus,
 } from "./repositories/order.repository";
 
+import {
+  cancelOrderAndRestock,
+  OrderCancellationError,
+} from "./services/order-cancellation.service";
 import type { ProductInput } from "./types/product";
 import type {
   CustomerInfo,
@@ -128,6 +132,27 @@ function normalizeCheckoutItems(
   }
 
   return items;
+}
+
+
+function normalizePhoneForTracking(value: string): string {
+  const digits = value.replace(/\D/g, "");
+
+  if (digits.startsWith("84") && digits.length === 11) {
+    return `0${digits.slice(2)}`;
+  }
+
+  return digits;
+}
+
+function maskPhone(value: string): string {
+  const phone = normalizePhoneForTracking(value);
+
+  if (phone.length < 6) {
+    return "••••••";
+  }
+
+  return `${phone.slice(0, 3)}••••${phone.slice(-3)}`;
 }
 
 app.get("/health", (req, res) => {
@@ -298,6 +323,86 @@ app.post("/orders", async (req, res) => {
   }
 });
 
+
+app.post("/order-tracking", async (req, res) => {
+  try {
+    const { orderId, phone } = req.body as {
+      orderId?: unknown;
+      phone?: unknown;
+    };
+
+    if (
+      typeof orderId !== "string" ||
+      !orderId.trim() ||
+      typeof phone !== "string" ||
+      !phone.trim()
+    ) {
+      return res.status(400).json({
+        message: "Vui lòng nhập mã đơn hàng và số điện thoại.",
+      });
+    }
+
+    const normalizedOrderId = orderId.trim();
+    const normalizedPhone = normalizePhoneForTracking(phone);
+
+    if (!normalizedPhone) {
+      return res.status(400).json({
+        message: "Số điện thoại không hợp lệ.",
+      });
+    }
+
+    const order = await getOrderById(normalizedOrderId);
+    const customer = order?.customer;
+
+    if (
+      !order ||
+      !customer ||
+      !customer.phone ||
+      normalizePhoneForTracking(customer.phone) !== normalizedPhone
+    ) {
+      return res.status(404).json({
+        message: "Không tìm thấy đơn hàng phù hợp.",
+      });
+    }
+
+    return res.json({
+      data: {
+        orderId: order.orderId,
+
+        customer: {
+          fullName: customer.fullName,
+          phone: maskPhone(customer.phone),
+        },
+
+        items: (order.items ?? []).map((item) => ({
+          productId: item.productId,
+          name: item.name,
+          quantity: item.quantity,
+          salePrice: item.salePrice,
+        })),
+
+        subtotal: order.subtotal,
+        shippingFee: order.shippingFee,
+        discount: order.discount,
+        total: order.total,
+
+        paymentMethod: order.paymentMethod,
+        paymentStatus: order.paymentStatus,
+        orderStatus: order.orderStatus,
+
+        createdAt: order.createdAt,
+        updatedAt: order.updatedAt,
+      },
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Không thể tra cứu đơn hàng.",
+    });
+  }
+});
+
 // =========================
 // Admin Order APIs
 // =========================
@@ -334,7 +439,7 @@ app.patch("/admin/orders/:orderId/status", async (req, res) => {
 
     if (!orderStatus || !validStatuses.includes(orderStatus)) {
       return res.status(400).json({
-        message: "Invalid order status",
+        message: "Trạng thái đơn hàng không hợp lệ.",
       });
     }
 
@@ -342,7 +447,60 @@ app.patch("/admin/orders/:orderId/status", async (req, res) => {
 
     if (!existingOrder) {
       return res.status(404).json({
-        message: "Order not found",
+        message: "Không tìm thấy đơn hàng.",
+      });
+    }
+
+    if (orderStatus === "CANCELLED") {
+      if (existingOrder.orderStatus === "CANCELLED") {
+        return res.status(409).json({
+          message: "Đơn hàng đã được hủy trước đó.",
+        });
+      }
+
+      if (
+        existingOrder.orderStatus !== "PROCESSING" &&
+        existingOrder.orderStatus !== "SHIPPING"
+      ) {
+        return res.status(409).json({
+          message:
+            "Chỉ có thể hủy đơn đang xử lý hoặc đang giao hàng.",
+        });
+      }
+
+      try {
+        await cancelOrderAndRestock(existingOrder);
+      } catch (error) {
+        if (error instanceof OrderCancellationError) {
+          return res.status(400).json({
+            message: error.message,
+          });
+        }
+
+        if (
+          error instanceof Error &&
+          error.name === "TransactionCanceledException"
+        ) {
+          return res.status(409).json({
+            message:
+              "Đơn hàng hoặc tồn kho vừa được cập nhật. Hãy tải lại trang và kiểm tra lại.",
+          });
+        }
+
+        throw error;
+      }
+
+      const cancelledOrder = await getOrderById(existingOrder.orderId);
+
+      return res.json({
+        data: cancelledOrder,
+      });
+    }
+
+    if (existingOrder.orderStatus === "CANCELLED") {
+      return res.status(409).json({
+        message:
+          "Không thể chuyển đơn đã hủy sang trạng thái khác vì tồn kho đã được hoàn lại.",
       });
     }
 
@@ -358,7 +516,7 @@ app.patch("/admin/orders/:orderId/status", async (req, res) => {
     console.error(error);
 
     return res.status(500).json({
-      message: "Cannot update order status",
+      message: "Không thể cập nhật trạng thái đơn hàng.",
     });
   }
 });
@@ -526,6 +684,3 @@ if (require.main === module) {
     console.log(`Backend running at http://localhost:${port}`);
   });
 }
-
-
-
