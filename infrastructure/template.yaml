@@ -87,6 +87,8 @@ Resources:
         Variables:
           PRODUCTS_TABLE: !Ref ProductsTableName
           ORDERS_TABLE: !Ref OrdersTableName
+          PRODUCT_IMAGES_BUCKET: !Ref FrontendBucket
+          PRODUCT_IMAGES_BASE_URL: !Sub "https://${FrontendDistribution.DomainName}"
 
       Policies:
         - Statement:
@@ -103,6 +105,11 @@ Resources:
               - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ProductsTableName}"
               - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ProductsTableName}/index/*"
               - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${OrdersTableName}"
+        - Statement:
+            Effect: Allow
+            Action:
+              - s3:PutObject
+            Resource: !Sub "${FrontendBucket.Arn}/uploads/products/*"
 
       Events:
         PublicApi:
@@ -153,6 +160,21 @@ Resources:
         BlockPublicPolicy: true
         RestrictPublicBuckets: true
 
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins:
+              - http://localhost:3000
+              - http://127.0.0.1:3000
+              - https://dfjng6e5jz4mf.cloudfront.net
+            AllowedMethods:
+              - GET
+              - HEAD
+              - PUT
+            AllowedHeaders:
+              - "*"
+            ExposedHeaders:
+              - ETag
+            MaxAge: 3000
   FrontendOriginAccessControl:
     Type: AWS::CloudFront::OriginAccessControl
     Properties:

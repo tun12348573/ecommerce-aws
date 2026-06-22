@@ -5,6 +5,11 @@ import cors from "cors";
 import express from "express";
 
 import {
+  createProductImageUploadUrl,
+  ProductImageUploadError,
+} from "./services/product-image-upload.service";
+
+import {
   createProduct,
   deleteProductById,
   getProductById,
@@ -354,6 +359,47 @@ app.patch("/admin/orders/:orderId/status", async (req, res) => {
 
     return res.status(500).json({
       message: "Cannot update order status",
+    });
+  }
+});
+
+app.post("/admin/uploads/product-image", async (req, res) => {
+  try {
+    const { fileName, contentType } = req.body as {
+      fileName?: unknown;
+      contentType?: unknown;
+    };
+
+    if (
+      typeof fileName !== "string" ||
+      !fileName.trim() ||
+      typeof contentType !== "string" ||
+      !contentType.trim()
+    ) {
+      return res.status(400).json({
+        message: "Tên file và định dạng ảnh là bắt buộc.",
+      });
+    }
+
+    const uploadData = await createProductImageUploadUrl({
+      fileName,
+      contentType,
+    });
+
+    return res.status(201).json({
+      data: uploadData,
+    });
+  } catch (error) {
+    console.error(error);
+
+    if (error instanceof ProductImageUploadError) {
+      return res.status(400).json({
+        message: error.message,
+      });
+    }
+
+    return res.status(500).json({
+      message: "Không thể tạo URL upload ảnh.",
     });
   }
 });

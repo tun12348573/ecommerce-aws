@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
+type ChangeEvent,
 type FormEvent,
 useEffect,
 useMemo,
 useState,
 } from "react";
-import { useRouter } from "next/navigation";
 
 import { AdminGuard } from "@/components/admin/AdminGuard";
 import { AdminAuthError } from "@/lib/admin-auth";
@@ -17,6 +18,7 @@ adminGet,
 adminPost,
 adminPut,
 } from "@/lib/admin-api";
+import { uploadProductImage } from "@/lib/product-image-upload";
 import type { Product } from "@/types/product";
 
 type ProductsResponse = {
@@ -84,13 +86,13 @@ const router = useRouter();
 
 const [products, setProducts] = useState<Product[]>([]);
 const [form, setForm] = useState<ProductForm>(emptyForm);
-
 const [editingProductId, setEditingProductId] = useState<string | null>(
 null
 );
 
 const [isLoading, setIsLoading] = useState(true);
 const [isSaving, setIsSaving] = useState(false);
+const [isUploadingImage, setIsUploadingImage] = useState(false);
 const [deletingProductId, setDeletingProductId] = useState<string | null>(
 null
 );
@@ -169,6 +171,48 @@ try {
   setIsLoading(false);
 }
 
+}
+
+async function handleImageFileChange(
+  event: ChangeEvent<HTMLInputElement>
+) {
+  const input = event.currentTarget;
+  const file = input.files?.[0];
+
+  if (!file) {
+    return;
+  }
+
+  setErrorMessage("");
+  setSuccessMessage(`Đã chọn "${file.name}". Đang upload ảnh lên S3...`);
+  setIsUploadingImage(true);
+
+  try {
+    const imageUrl = await uploadProductImage(file);
+
+    setForm((currentForm) => ({
+      ...currentForm,
+      image: imageUrl,
+    }));
+
+    setSuccessMessage(
+      "Đã upload ảnh thành công. URL CloudFront đã được điền vào form."
+    );
+  } catch (error) {
+    if (error instanceof AdminAuthError) {
+      router.replace("/admin/login");
+      return;
+    }
+
+    setErrorMessage(
+      error instanceof Error
+        ? error.message
+        : "Không thể upload ảnh sản phẩm."
+    );
+  } finally {
+    input.value = "";
+    setIsUploadingImage(false);
+  }
 }
 
 function buildPayload(): ProductPayload {
@@ -347,7 +391,6 @@ try {
 
 return ( <main className="mx-auto min-h-screen max-w-7xl px-6 py-10"> <header className="flex flex-col gap-5 border-b border-slate-200 pb-6 sm:flex-row sm:items-center sm:justify-between"> <div> <p className="text-sm font-semibold text-slate-500">
 ECOMMERCE AWS ADMIN </p>
-
       <h1 className="mt-1 text-3xl font-bold text-slate-900">
         Quản lý sản phẩm
       </h1>
@@ -598,16 +641,58 @@ ECOMMERCE AWS ADMIN </p>
           />
         </label>
 
+        <label className="block">
+          <span className="text-sm font-medium text-slate-700">
+            Upload ảnh từ máy
+          </span>
+
+          <input
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            onChange={(event) => {
+              void handleImageFileChange(event);
+            }}
+            disabled={isUploadingImage}
+            className="mt-2 block w-full cursor-pointer rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 file:mr-4 file:rounded-md file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-slate-700 hover:file:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-60"
+          />
+
+          <span className="mt-2 block text-xs text-slate-500">
+            Chỉ nhận JPG, PNG hoặc WEBP. Tối đa 5 MB.
+          </span>
+        </label>
+
+        {isUploadingImage ? (
+          <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
+            Đang upload ảnh lên S3...
+          </p>
+        ) : null}
+
+        {form.image ? (
+          <div className="rounded-xl border border-slate-200 p-3">
+            <p className="text-sm font-medium text-slate-700">
+              Xem trước ảnh
+            </p>
+
+            <img
+              src={form.image}
+              alt="Xem trước ảnh sản phẩm"
+              className="mt-3 aspect-square w-full rounded-lg border border-slate-100 object-cover"
+            />
+          </div>
+        ) : null}
+
         <button
           type="submit"
-          disabled={isSaving}
+          disabled={isSaving || isUploadingImage}
           className="w-full rounded-lg bg-slate-900 px-4 py-3 font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {isSaving
-            ? "Đang lưu..."
-            : editingProductId
-              ? "Lưu thay đổi"
-              : "Thêm sản phẩm"}
+          {isUploadingImage
+            ? "Đang upload ảnh..."
+            : isSaving
+              ? "Đang lưu..."
+              : editingProductId
+                ? "Lưu thay đổi"
+                : "Thêm sản phẩm"}
         </button>
       </div>
     </form>
@@ -712,7 +797,6 @@ ECOMMERCE AWS ADMIN </p>
     </section>
   </section>
 </main>
-
 
 );
 }
