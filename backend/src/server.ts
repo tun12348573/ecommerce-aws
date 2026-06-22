@@ -1,6 +1,9 @@
 import "dotenv/config";
-import express from "express";
+import { randomUUID } from "node:crypto";
+
 import cors from "cors";
+import express from "express";
+
 import {
   createProduct,
   deleteProductById,
@@ -9,12 +12,14 @@ import {
   listProducts,
   updateProduct,
 } from "./repositories/product.repository";
+
 import {
-  createOrder,
+  createOrderAndDecrementStock,
   getOrderById,
   listOrders,
   updateOrderStatus,
 } from "./repositories/order.repository";
+
 import type { ProductInput } from "./types/product";
 import type {
   CustomerInfo,
@@ -29,9 +34,22 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+type CheckoutItemInput = {
+  productId?: unknown;
+  quantity?: unknown;
+};
+
 function parseProductInput(body: Partial<ProductInput>): ProductInput | null {
-  const { name, slug, category, description, price, salePrice, stock, image } =
-    body;
+  const {
+    name,
+    slug,
+    category,
+    description,
+    price,
+    salePrice,
+    stock,
+    image,
+  } = body;
 
   if (
     !name ||
@@ -57,14 +75,65 @@ function parseProductInput(body: Partial<ProductInput>): ProductInput | null {
   };
 }
 
+function normalizeCheckoutItems(
+  input: unknown
+): Array<{ productId: string; quantity: number }> | null {
+  if (!Array.isArray(input) || input.length === 0) {
+    return null;
+  }
+
+  const quantities = new Map<string, number>();
+
+  for (const rawItem of input) {
+    if (!rawItem || typeof rawItem !== "object") {
+      return null;
+    }
+
+    const item = rawItem as CheckoutItemInput;
+
+    if (
+      typeof item.productId !== "string" ||
+      !item.productId.trim() ||
+      typeof item.quantity !== "number" ||
+      !Number.isInteger(item.quantity) ||
+      item.quantity <= 0
+    ) {
+      return null;
+    }
+
+    const currentQuantity = quantities.get(item.productId) || 0;
+
+    quantities.set(item.productId, currentQuantity + item.quantity);
+  }
+
+  const items = Array.from(
+    quantities,
+    ([productId, quantity]) => ({
+      productId,
+      quantity,
+    })
+  );
+
+  // DynamoDB transaction tối đa 100 actions.
+  // 1 action tạo order, nên chỉ nhận tối đa 99 sản phẩm khác nhau.
+  if (items.length > 99) {
+    return null;
+  }
+
+  return items;
+}
+
 app.get("/health", (req, res) => {
   return res.json({
     status: "ok",
     service: "ecommerce-backend",
     database: "DynamoDB",
-    message: "Backend is running successfully",
   });
 });
+
+// =========================
+// Product APIs
+// =========================
 
 app.get("/products", async (req, res) => {
   try {
@@ -104,29 +173,34 @@ app.get("/products/:slug", async (req, res) => {
   }
 });
 
+// =========================
+// Order APIs
+// =========================
+
 app.post("/orders", async (req, res) => {
   try {
-    const { items, customer, paymentMethod } = req.body as {
-      items?: Array<{
-        productId: string;
-        quantity: number;
-      }>;
+    const body = req.body as {
+      items?: unknown;
       customer?: CustomerInfo;
       paymentMethod?: PaymentMethod;
     };
 
-    if (!items || items.length === 0) {
+    const checkoutItems = normalizeCheckoutItems(body.items);
+
+    if (!checkoutItems) {
       return res.status(400).json({
-        message: "Cart is empty",
+        message: "Cart is empty or invalid",
       });
     }
 
+    const customer = body.customer;
+
     if (
       !customer ||
-      !customer.fullName ||
-      !customer.phone ||
-      !customer.email ||
-      !customer.address
+      !customer.fullName?.trim() ||
+      !customer.phone?.trim() ||
+      !customer.email?.trim() ||
+      !customer.address?.trim()
     ) {
       return res.status(400).json({
         message: "Customer information is required",
@@ -135,12 +209,7 @@ app.post("/orders", async (req, res) => {
 
     const orderItems: OrderItem[] = [];
 
-    const productsToUpdate: Array<{
-      productId: string;
-      input: ProductInput;
-    }> = [];
-
-    for (const item of items) {
+    for (const item of checkoutItems) {
       const product = await getProductById(item.productId);
 
       if (!product) {
@@ -149,15 +218,9 @@ app.post("/orders", async (req, res) => {
         });
       }
 
-      if (item.quantity <= 0) {
-        return res.status(400).json({
-          message: "Invalid product quantity",
-        });
-      }
-
       if (item.quantity > product.stock) {
-        return res.status(400).json({
-          message: `${product.name} is out of stock`,
+        return res.status(409).json({
+          message: `${product.name} does not have enough stock`,
         });
       }
 
@@ -169,20 +232,6 @@ app.post("/orders", async (req, res) => {
         salePrice: product.salePrice,
         quantity: item.quantity,
       });
-
-      productsToUpdate.push({
-        productId: product.productId,
-        input: {
-          name: product.name,
-          slug: product.slug,
-          category: product.category,
-          description: product.description,
-          price: product.price,
-          salePrice: product.salePrice,
-          stock: product.stock - item.quantity,
-          image: product.image,
-        },
-      });
     }
 
     const subtotal = orderItems.reduce((total, item) => {
@@ -191,28 +240,43 @@ app.post("/orders", async (req, res) => {
 
     const shippingFee = 30000;
     const discount = 0;
-    const total = subtotal + shippingFee - discount;
     const now = new Date().toISOString();
 
+    const paymentMethod: PaymentMethod =
+      body.paymentMethod === "BANK_TRANSFER" ? "BANK_TRANSFER" : "COD";
+
     const order: Order = {
-      orderId: `ord_${Date.now()}`,
+      orderId: `ord_${randomUUID()}`,
       customer,
       items: orderItems,
+
       subtotal,
       shippingFee,
       discount,
-      total,
-      paymentMethod: paymentMethod || "COD",
+      total: subtotal + shippingFee - discount,
+
+      paymentMethod,
       paymentStatus: "PENDING",
       orderStatus: "PROCESSING",
+
       createdAt: now,
       updatedAt: now,
     };
 
-    await createOrder(order);
+    try {
+      await createOrderAndDecrementStock(order);
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.name === "TransactionCanceledException"
+      ) {
+        return res.status(409).json({
+          message:
+            "Không thể tạo đơn hàng vì tồn kho vừa thay đổi. Hãy kiểm tra lại giỏ hàng.",
+        });
+      }
 
-    for (const product of productsToUpdate) {
-      await updateProduct(product.productId, product.input);
+      throw error;
     }
 
     return res.status(201).json({
@@ -264,6 +328,10 @@ app.get("/orders/:orderId", async (req, res) => {
     });
   }
 });
+
+// =========================
+// Admin Order APIs
+// =========================
 
 app.get("/admin/orders", async (req, res) => {
   try {
@@ -324,6 +392,10 @@ app.patch("/admin/orders/:orderId/status", async (req, res) => {
     });
   }
 });
+
+// =========================
+// Admin Product APIs
+// =========================
 
 app.get("/admin/products", async (req, res) => {
   try {
@@ -441,3 +513,4 @@ const port = 4000;
 app.listen(port, () => {
   console.log(`Backend running at http://localhost:${port}`);
 });
+

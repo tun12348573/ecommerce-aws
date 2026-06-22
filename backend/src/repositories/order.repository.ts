@@ -1,10 +1,16 @@
 import {
   GetCommand,
-  PutCommand,
   ScanCommand,
+  TransactWriteCommand,
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
-import { docClient, getOrdersTableName } from "../shared/dynamodb";
+
+import {
+  docClient,
+  getOrdersTableName,
+  getProductsTableName,
+} from "../shared/dynamodb";
+
 import type { Order, OrderStatus } from "../types/order";
 
 export async function listOrders(): Promise<Order[]> {
@@ -14,7 +20,7 @@ export async function listOrders(): Promise<Order[]> {
     })
   );
 
-  const orders = (result.Items || []) as Order[];
+  const orders = (result.Items ?? []) as Order[];
 
   return orders.sort((a, b) => {
     return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
@@ -34,16 +40,46 @@ export async function getOrderById(orderId: string): Promise<Order | null> {
   return (result.Item as Order) || null;
 }
 
-export async function createOrder(order: Order): Promise<Order> {
+export async function createOrderAndDecrementStock(
+  order: Order
+): Promise<void> {
+  const ordersTableName = getOrdersTableName();
+  const productsTableName = getProductsTableName();
+
   await docClient.send(
-    new PutCommand({
-      TableName: getOrdersTableName(),
-      Item: order,
-      ConditionExpression: "attribute_not_exists(orderId)",
+    new TransactWriteCommand({
+      TransactItems: [
+        {
+          Put: {
+            TableName: ordersTableName,
+            Item: order,
+            ConditionExpression: "attribute_not_exists(orderId)",
+          },
+        },
+
+        ...order.items.map((item) => ({
+          Update: {
+            TableName: productsTableName,
+            Key: {
+              productId: item.productId,
+            },
+            UpdateExpression:
+              "SET #stock = #stock - :quantity, #updatedAt = :updatedAt",
+            ConditionExpression:
+              "attribute_exists(productId) AND #stock >= :quantity",
+            ExpressionAttributeNames: {
+              "#stock": "stock",
+              "#updatedAt": "updatedAt",
+            },
+            ExpressionAttributeValues: {
+              ":quantity": item.quantity,
+              ":updatedAt": order.updatedAt,
+            },
+          },
+        })),
+      ],
     })
   );
-
-  return order;
 }
 
 export async function updateOrderStatus(
@@ -56,7 +92,9 @@ export async function updateOrderStatus(
       Key: {
         orderId,
       },
-      UpdateExpression: "SET orderStatus = :orderStatus, updatedAt = :updatedAt",
+      UpdateExpression:
+        "SET orderStatus = :orderStatus, updatedAt = :updatedAt",
+      ConditionExpression: "attribute_exists(orderId)",
       ExpressionAttributeValues: {
         ":orderStatus": orderStatus,
         ":updatedAt": new Date().toISOString(),
@@ -67,3 +105,4 @@ export async function updateOrderStatus(
 
   return (result.Attributes as Order) || null;
 }
+

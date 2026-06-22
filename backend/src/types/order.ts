@@ -29,13 +29,17 @@ export type Order = {
   orderId: string;
   customer: CustomerInfo;
   items: OrderItem[];
+
   subtotal: number;
   shippingFee: number;
   discount: number;
   total: number;
+
   paymentMethod: PaymentMethod;
   paymentStatus: PaymentStatus;
   orderStatus: OrderStatus;
+
   createdAt: string;
   updatedAt: string;
 };
+
