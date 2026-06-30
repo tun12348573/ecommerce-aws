@@ -17,6 +17,21 @@ import type {
   OrderStatusHistoryItem,
 } from "../types/order";
 
+type SaveZaloPayPaymentSessionInput = {
+  orderId: string;
+  appTransId: string;
+  orderUrl: string;
+  expiresAt: string;
+};
+
+type MarkZaloPayOrderPaidInput = {
+  orderId: string;
+  appTransId: string;
+  amount: number;
+  transactionId: string;
+  paidAt: string;
+};
+
 export async function listOrders(): Promise<Order[]> {
   const result = await docClient.send(
     new ScanCommand({
@@ -116,6 +131,85 @@ export async function updateOrderStatus(
         ":updatedAt": changedAt,
         ":emptyHistory": [],
         ":newStatusHistory": [historyItem],
+      },
+      ReturnValues: "ALL_NEW",
+    })
+  );
+
+  return (result.Attributes as Order) || null;
+}
+
+export async function saveZaloPayPaymentSession(
+  input: SaveZaloPayPaymentSessionInput
+): Promise<Order | null> {
+  const updatedAt = new Date().toISOString();
+
+  const result = await docClient.send(
+    new UpdateCommand({
+      TableName: getOrdersTableName(),
+      Key: {
+        orderId: input.orderId,
+      },
+      UpdateExpression:
+        "SET #zalopayAppTransId = :appTransId, #zalopayOrderUrl = :orderUrl, #zalopayPaymentExpiresAt = :expiresAt, #updatedAt = :updatedAt",
+      ConditionExpression:
+        "attribute_exists(orderId) AND #paymentMethod = :paymentMethod AND #paymentStatus = :paymentStatus AND attribute_not_exists(#zalopayAppTransId)",
+      ExpressionAttributeNames: {
+        "#paymentMethod": "paymentMethod",
+        "#paymentStatus": "paymentStatus",
+        "#zalopayAppTransId": "zalopayAppTransId",
+        "#zalopayOrderUrl": "zalopayOrderUrl",
+        "#zalopayPaymentExpiresAt": "zalopayPaymentExpiresAt",
+        "#updatedAt": "updatedAt",
+      },
+      ExpressionAttributeValues: {
+        ":appTransId": input.appTransId,
+        ":orderUrl": input.orderUrl,
+        ":expiresAt": input.expiresAt,
+        ":updatedAt": updatedAt,
+        ":paymentMethod": "ZALOPAY",
+        ":paymentStatus": "PENDING",
+      },
+      ReturnValues: "ALL_NEW",
+    })
+  );
+
+  return (result.Attributes as Order) || null;
+}
+
+export async function markZaloPayOrderPaid(
+  input: MarkZaloPayOrderPaidInput
+): Promise<Order | null> {
+  const result = await docClient.send(
+    new UpdateCommand({
+      TableName: getOrdersTableName(),
+      Key: {
+        orderId: input.orderId,
+      },
+      UpdateExpression:
+        "SET #paymentStatus = :paid, #paymentTransactionId = :transactionId, #paidAt = :paidAt, #updatedAt = :updatedAt REMOVE #zalopayOrderUrl, #zalopayPaymentExpiresAt",
+      ConditionExpression:
+        "attribute_exists(orderId) AND #paymentMethod = :paymentMethod AND #paymentStatus = :pending AND #zalopayAppTransId = :appTransId AND #total = :amount",
+      ExpressionAttributeNames: {
+        "#paymentMethod": "paymentMethod",
+        "#paymentStatus": "paymentStatus",
+        "#paymentTransactionId": "paymentTransactionId",
+        "#paidAt": "paidAt",
+        "#updatedAt": "updatedAt",
+        "#zalopayAppTransId": "zalopayAppTransId",
+        "#zalopayOrderUrl": "zalopayOrderUrl",
+        "#zalopayPaymentExpiresAt": "zalopayPaymentExpiresAt",
+        "#total": "total",
+      },
+      ExpressionAttributeValues: {
+        ":paymentMethod": "ZALOPAY",
+        ":pending": "PENDING",
+        ":paid": "PAID",
+        ":appTransId": input.appTransId,
+        ":amount": input.amount,
+        ":transactionId": input.transactionId,
+        ":paidAt": input.paidAt,
+        ":updatedAt": input.paidAt,
       },
       ReturnValues: "ALL_NEW",
     })

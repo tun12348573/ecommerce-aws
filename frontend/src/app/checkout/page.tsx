@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useMemo, useState } from "react";
+import { type FormEvent, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+
 import { apiPost } from "@/lib/api";
 import { clearCart } from "@/lib/cart";
 import { useCartItems } from "@/hooks/useCartItems";
@@ -12,6 +13,15 @@ import type {
   OrderResponse,
   PaymentMethod,
 } from "@/types/order";
+
+type ZaloPayCreatePaymentResponse = {
+  data: {
+    orderId: string;
+    amount: number;
+    orderUrl: string;
+    expiresAt: string;
+  };
+};
 
 function formatPrice(value: number) {
   return new Intl.NumberFormat("vi-VN", {
@@ -66,6 +76,8 @@ export default function CheckoutPage() {
     setError("");
     setIsSubmitting(true);
 
+    let createdOrderId: string | null = null;
+
     try {
       const payload: CreateOrderRequest = {
         items,
@@ -73,15 +85,52 @@ export default function CheckoutPage() {
         paymentMethod,
       };
 
-      const response = await apiPost<OrderResponse, CreateOrderRequest>(
+      const orderResponse = await apiPost<OrderResponse, CreateOrderRequest>(
         "/orders",
         payload
       );
 
+      createdOrderId = orderResponse.data.orderId;
+
+      window.sessionStorage.setItem(
+        `aws-shop-zalopay-phone:${createdOrderId}`,
+        customer.phone.trim()
+      );
+
       clearCart();
 
-      router.push(`/checkout/success?orderId=${response.data.orderId}`);
+      if (paymentMethod === "ZALOPAY") {
+        const paymentResponse = await apiPost<
+          ZaloPayCreatePaymentResponse,
+          {
+            orderId: string;
+            phone: string;
+          }
+        >("/payments/zalopay/create", {
+          orderId: createdOrderId,
+          phone: customer.phone.trim(),
+        });
+
+        window.location.assign(paymentResponse.data.orderUrl);
+        return;
+      }
+
+      router.replace(
+        `/checkout/success/?orderId=${encodeURIComponent(
+          createdOrderId
+        )}&paymentMethod=${paymentMethod}`
+      );
     } catch (error) {
+      if (createdOrderId) {
+        router.replace(
+          `/checkout/success/?orderId=${encodeURIComponent(
+            createdOrderId
+          )}&paymentMethod=${paymentMethod}&paymentSetup=failed`
+        );
+
+        return;
+      }
+
       setError(
         error instanceof Error
           ? error.message
@@ -91,6 +140,14 @@ export default function CheckoutPage() {
       setIsSubmitting(false);
     }
   }
+
+  const submitLabel = isSubmitting
+    ? paymentMethod === "ZALOPAY"
+      ? "Đang chuyển sang ZaloPay..."
+      : "Đang tạo đơn hàng..."
+    : paymentMethod === "ZALOPAY"
+      ? "Thanh toán với ZaloPay"
+      : "Đặt hàng";
 
   return (
     <main className="min-h-screen bg-gray-50 text-gray-900">
@@ -105,11 +162,11 @@ export default function CheckoutPage() {
               Trang chủ
             </Link>
 
-            <Link href="/products" className="text-gray-600 hover:text-black">
+            <Link href="/products/" className="text-gray-600 hover:text-black">
               Sản phẩm
             </Link>
 
-            <Link href="/cart" className="text-gray-600 hover:text-black">
+            <Link href="/cart/" className="text-gray-600 hover:text-black">
               Giỏ hàng
             </Link>
           </nav>
@@ -134,7 +191,7 @@ export default function CheckoutPage() {
             </p>
 
             <Link
-              href="/products"
+              href="/products/"
               className="inline-block rounded-xl bg-black px-6 py-3 text-sm font-bold text-white"
             >
               Tiếp tục mua sắm
@@ -156,6 +213,7 @@ export default function CheckoutPage() {
                     <label className="mb-2 block text-sm font-bold">
                       Họ và tên
                     </label>
+
                     <input
                       required
                       value={customer.fullName}
@@ -171,6 +229,7 @@ export default function CheckoutPage() {
                     <label className="mb-2 block text-sm font-bold">
                       Số điện thoại
                     </label>
+
                     <input
                       required
                       value={customer.phone}
@@ -186,6 +245,7 @@ export default function CheckoutPage() {
                     <label className="mb-2 block text-sm font-bold">
                       Email
                     </label>
+
                     <input
                       required
                       type="email"
@@ -202,6 +262,7 @@ export default function CheckoutPage() {
                     <label className="mb-2 block text-sm font-bold">
                       Địa chỉ giao hàng
                     </label>
+
                     <textarea
                       required
                       value={customer.address}
@@ -217,6 +278,7 @@ export default function CheckoutPage() {
                     <label className="mb-2 block text-sm font-bold">
                       Ghi chú
                     </label>
+
                     <textarea
                       value={customer.note}
                       onChange={(event) =>
@@ -243,8 +305,10 @@ export default function CheckoutPage() {
                       checked={paymentMethod === "COD"}
                       onChange={() => setPaymentMethod("COD")}
                     />
+
                     <div>
                       <p className="font-bold">Thanh toán khi nhận hàng</p>
+
                       <p className="text-sm text-gray-600">
                         Khách trả tiền sau khi nhận sản phẩm.
                       </p>
@@ -259,10 +323,32 @@ export default function CheckoutPage() {
                       checked={paymentMethod === "BANK_TRANSFER"}
                       onChange={() => setPaymentMethod("BANK_TRANSFER")}
                     />
+
                     <div>
                       <p className="font-bold">Chuyển khoản ngân hàng</p>
+
                       <p className="text-sm text-gray-600">
-                        Giai đoạn sau sẽ thêm thông tin tài khoản và xác nhận.
+                        Shop sẽ xác nhận thanh toán sau khi kiểm tra giao dịch.
+                      </p>
+                    </div>
+                  </label>
+
+                  <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-blue-200 bg-blue-50 p-4">
+                    <input
+                      type="radio"
+                      name="paymentMethod"
+                      value="ZALOPAY"
+                      checked={paymentMethod === "ZALOPAY"}
+                      onChange={() => setPaymentMethod("ZALOPAY")}
+                    />
+
+                    <div>
+                      <p className="font-bold text-blue-950">
+                        Thanh toán qua ZaloPay
+                      </p>
+
+                      <p className="text-sm text-blue-800">
+                        Bạn sẽ được chuyển sang cổng thanh toán ZaloPay Sandbox.
                       </p>
                     </div>
                   </label>
@@ -281,6 +367,7 @@ export default function CheckoutPage() {
                   >
                     <div>
                       <p className="font-bold">{item.name}</p>
+
                       <p className="text-gray-600">
                         SL: {item.quantity} × {formatPrice(item.salePrice)}
                       </p>
@@ -311,6 +398,13 @@ export default function CheckoutPage() {
                   <span className="text-red-600">{formatPrice(total)}</span>
                 </div>
 
+                {paymentMethod === "ZALOPAY" ? (
+                  <p className="mb-4 rounded-xl bg-blue-50 p-3 text-sm text-blue-800">
+                    Sau khi tạo đơn, bạn sẽ được chuyển sang ZaloPay để thanh
+                    toán.
+                  </p>
+                ) : null}
+
                 {error ? (
                   <p className="mb-4 rounded-xl bg-red-50 p-3 text-sm font-semibold text-red-600">
                     {error}
@@ -322,11 +416,11 @@ export default function CheckoutPage() {
                   disabled={isSubmitting}
                   className="w-full rounded-xl bg-black px-5 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:bg-gray-400"
                 >
-                  {isSubmitting ? "Đang tạo đơn hàng..." : "Đặt hàng"}
+                  {submitLabel}
                 </button>
 
                 <Link
-                  href="/cart"
+                  href="/cart/"
                   className="mt-3 block text-center text-sm font-bold text-blue-600"
                 >
                   Quay lại giỏ hàng
@@ -339,3 +433,4 @@ export default function CheckoutPage() {
     </main>
   );
 }
+

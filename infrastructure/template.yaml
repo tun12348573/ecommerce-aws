@@ -89,6 +89,9 @@ Resources:
           ORDERS_TABLE: !Ref OrdersTableName
           PRODUCT_IMAGES_BUCKET: !Ref FrontendBucket
           PRODUCT_IMAGES_BASE_URL: !Sub "https://${FrontendDistribution.DomainName}"
+          ZALOPAY_SECRET_ID: ecommerce-aws/zalopay/sandbox
+          ZALOPAY_CALLBACK_URL: "https://89yap0gq5k.execute-api.ap-southeast-1.amazonaws.com/prod/payments/zalopay/callback"
+          ZALOPAY_REDIRECT_URL: !Sub "https://${FrontendDistribution.DomainName}/checkout/success/"
 
       Policies:
         - Statement:
@@ -110,6 +113,14 @@ Resources:
             Action:
               - s3:PutObject
             Resource: !Sub "${FrontendBucket.Arn}/uploads/products/*"
+
+        - Statement:
+            Effect: Allow
+
+            Action:
+              - secretsmanager:GetSecretValue
+
+            Resource: !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:ecommerce-aws/zalopay/sandbox-*"
 
       Events:
         PublicApi:

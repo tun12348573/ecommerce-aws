@@ -1,4 +1,4 @@
-export type PaymentMethod = "COD" | "BANK_TRANSFER";
+export type PaymentMethod = "COD" | "BANK_TRANSFER" | "ZALOPAY";
 
 export type PaymentStatus = "PENDING" | "PAID";
 
@@ -42,8 +42,15 @@ export type Order = {
 
   paymentMethod: PaymentMethod;
   paymentStatus: PaymentStatus;
-  orderStatus: OrderStatus;
 
+  paymentTransactionId?: string;
+  paidAt?: string;
+
+  zalopayAppTransId?: string;
+  zalopayOrderUrl?: string;
+  zalopayPaymentExpiresAt?: string;
+
+  orderStatus: OrderStatus;
   statusHistory?: OrderStatusHistoryItem[];
 
   createdAt: string;

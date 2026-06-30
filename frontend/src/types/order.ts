@@ -1,6 +1,6 @@
 import type { CartItem } from "@/types/cart";
 
-export type PaymentMethod = "COD" | "BANK_TRANSFER";
+export type PaymentMethod = "COD" | "BANK_TRANSFER" | "ZALOPAY";
 
 export type PaymentStatus = "PENDING" | "PAID";
 

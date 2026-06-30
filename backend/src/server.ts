@@ -22,6 +22,8 @@ import {
   createOrderAndDecrementStock,
   getOrderById,
   listOrders,
+  markZaloPayOrderPaid,
+  saveZaloPayPaymentSession,
   updateOrderStatus,
 } from "./repositories/order.repository";
 
@@ -29,6 +31,15 @@ import {
   cancelOrderAndRestock,
   OrderCancellationError,
 } from "./services/order-cancellation.service";
+
+import {
+  createZaloPayOrder,
+  getOrderIdFromZaloPayAppTransId,
+  queryZaloPayOrder,
+  verifyZaloPayCallback,
+  ZaloPayPaymentError,
+} from "./services/zalopay-payment.service";
+
 import type { ProductInput } from "./types/product";
 import type {
   CustomerInfo,
@@ -274,8 +285,21 @@ app.post("/orders", async (req, res) => {
     const discount = 0;
     const now = new Date().toISOString();
 
-    const paymentMethod: PaymentMethod =
-      body.paymentMethod === "BANK_TRANSFER" ? "BANK_TRANSFER" : "COD";
+    let paymentMethod: PaymentMethod = "COD";
+
+if (body.paymentMethod !== undefined) {
+  if (
+    body.paymentMethod !== "COD" &&
+    body.paymentMethod !== "BANK_TRANSFER" &&
+    body.paymentMethod !== "ZALOPAY"
+  ) {
+    return res.status(400).json({
+      message: "Phương thức thanh toán không hợp lệ.",
+    });
+  }
+
+  paymentMethod = body.paymentMethod;
+}
 
     const order: Order = {
       orderId: `ord_${randomUUID()}`,
@@ -330,6 +354,345 @@ app.post("/orders", async (req, res) => {
   }
 });
 
+
+// =========================
+// ZaloPay Sandbox Payment APIs
+// =========================
+
+app.post("/payments/zalopay/create", async (req, res) => {
+  try {
+    const { orderId, phone } = req.body as {
+      orderId?: unknown;
+      phone?: unknown;
+    };
+
+    if (
+      typeof orderId !== "string" ||
+      !orderId.trim() ||
+      typeof phone !== "string" ||
+      !phone.trim()
+    ) {
+      return res.status(400).json({
+        message: "Mã đơn hàng và số điện thoại là bắt buộc.",
+      });
+    }
+
+    const order = await getOrderById(orderId.trim());
+
+    if (!order) {
+      return res.status(404).json({
+        message: "Không tìm thấy đơn hàng.",
+      });
+    }
+
+    if (
+      normalizePhoneForTracking(order.customer.phone) !==
+      normalizePhoneForTracking(phone)
+    ) {
+      return res.status(404).json({
+        message: "Không tìm thấy đơn hàng phù hợp.",
+      });
+    }
+
+    if (order.paymentMethod !== "ZALOPAY") {
+      return res.status(409).json({
+        message: "Đơn hàng này không sử dụng ZaloPay.",
+      });
+    }
+
+    if (order.orderStatus === "CANCELLED") {
+      return res.status(409).json({
+        message: "Không thể thanh toán đơn hàng đã hủy.",
+      });
+    }
+
+    if (order.paymentStatus === "PAID") {
+      return res.status(409).json({
+        message: "Đơn hàng này đã được thanh toán.",
+      });
+    }
+
+    const existingExpiresAt = new Date(
+      order.zalopayPaymentExpiresAt ?? ""
+    ).getTime();
+
+    if (
+      order.zalopayOrderUrl &&
+      !Number.isNaN(existingExpiresAt) &&
+      existingExpiresAt > Date.now()
+    ) {
+      return res.json({
+        data: {
+          orderId: order.orderId,
+          amount: order.total,
+          orderUrl: order.zalopayOrderUrl,
+          expiresAt: order.zalopayPaymentExpiresAt,
+        },
+      });
+    }
+
+    if (order.zalopayAppTransId) {
+      return res.status(409).json({
+        message:
+          "Phiên thanh toán trước đã hết hạn. Hãy tạo một đơn hàng mới để thanh toán lại.",
+      });
+    }
+
+    const payment = await createZaloPayOrder(order);
+
+    const updatedOrder = await saveZaloPayPaymentSession({
+      orderId: order.orderId,
+      appTransId: payment.appTransId,
+      orderUrl: payment.orderUrl,
+      expiresAt: payment.expiresAt,
+    });
+
+    if (!updatedOrder) {
+      return res.status(404).json({
+        message: "Không thể lưu phiên thanh toán ZaloPay.",
+      });
+    }
+
+    return res.status(201).json({
+      data: {
+        orderId: updatedOrder.orderId,
+        amount: updatedOrder.total,
+        orderUrl: payment.orderUrl,
+        expiresAt: payment.expiresAt,
+      },
+    });
+  } catch (error) {
+    console.error(error);
+
+    if (error instanceof ZaloPayPaymentError) {
+      return res.status(502).json({
+        message: error.message,
+      });
+    }
+
+    if (
+      error instanceof Error &&
+      error.name === "ConditionalCheckFailedException"
+    ) {
+      return res.status(409).json({
+        message:
+          "Đơn hàng đã có phiên thanh toán hoặc không còn đủ điều kiện thanh toán.",
+      });
+    }
+
+    return res.status(500).json({
+      message: "Không thể tạo giao dịch ZaloPay.",
+    });
+  }
+});
+
+app.post("/payments/zalopay/callback", async (req, res) => {
+  try {
+    const { data, mac } = req.body as {
+      data?: unknown;
+      mac?: unknown;
+    };
+
+    const callback = await verifyZaloPayCallback(data, mac);
+
+    const orderId = getOrderIdFromZaloPayAppTransId(
+      callback.app_trans_id
+    );
+
+    if (!orderId) {
+      return res.json({
+        return_code: 2,
+        return_message: "invalid app_trans_id",
+      });
+    }
+
+    const order = await getOrderById(orderId);
+
+    if (
+      !order ||
+      order.paymentMethod !== "ZALOPAY" ||
+      order.zalopayAppTransId !== callback.app_trans_id ||
+      order.total !== callback.amount
+    ) {
+      return res.json({
+        return_code: 2,
+        return_message: "order validation failed",
+      });
+    }
+
+    if (order.paymentStatus === "PAID") {
+      return res.json({
+        return_code: 1,
+        return_message: "success",
+      });
+    }
+
+    try {
+      await markZaloPayOrderPaid({
+        orderId: order.orderId,
+        appTransId: callback.app_trans_id,
+        amount: callback.amount,
+        transactionId: String(callback.zp_trans_id),
+        paidAt: new Date(callback.server_time).toISOString(),
+      });
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.name === "ConditionalCheckFailedException"
+      ) {
+        const latestOrder = await getOrderById(order.orderId);
+
+        if (latestOrder?.paymentStatus === "PAID") {
+          return res.json({
+            return_code: 1,
+            return_message: "success",
+          });
+        }
+      }
+
+      throw error;
+    }
+
+    return res.json({
+      return_code: 1,
+      return_message: "success",
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.json({
+      return_code: 2,
+      return_message: "invalid",
+    });
+  }
+});
+
+app.post("/payments/zalopay/query", async (req, res) => {
+  try {
+    const { orderId, phone } = req.body as {
+      orderId?: unknown;
+      phone?: unknown;
+    };
+
+    if (
+      typeof orderId !== "string" ||
+      !orderId.trim() ||
+      typeof phone !== "string" ||
+      !phone.trim()
+    ) {
+      return res.status(400).json({
+        message: "Mã đơn hàng và số điện thoại là bắt buộc.",
+      });
+    }
+
+    const order = await getOrderById(orderId.trim());
+
+    if (!order) {
+      return res.status(404).json({
+        message: "Không tìm thấy đơn hàng.",
+      });
+    }
+
+    if (
+      normalizePhoneForTracking(order.customer.phone) !==
+      normalizePhoneForTracking(phone)
+    ) {
+      return res.status(404).json({
+        message: "Không tìm thấy đơn hàng phù hợp.",
+      });
+    }
+
+    if (order.paymentMethod !== "ZALOPAY") {
+      return res.status(409).json({
+        message: "Đơn hàng này không sử dụng ZaloPay.",
+      });
+    }
+
+    if (order.paymentStatus === "PAID") {
+      return res.json({
+        data: {
+          orderId: order.orderId,
+          paymentStatus: order.paymentStatus,
+          paidAt: order.paidAt,
+          paymentTransactionId: order.paymentTransactionId,
+        },
+      });
+    }
+
+    if (!order.zalopayAppTransId) {
+      return res.status(409).json({
+        message: "Đơn hàng chưa có phiên thanh toán ZaloPay.",
+      });
+    }
+
+    const queryResult = await queryZaloPayOrder(
+      order.zalopayAppTransId
+    );
+
+    if (queryResult.returnCode !== 1) {
+      return res.json({
+        data: {
+          orderId: order.orderId,
+          paymentStatus: order.paymentStatus,
+          zalopayStatus: queryResult.returnCode,
+          zalopayMessage: queryResult.returnMessage,
+        },
+      });
+    }
+
+    if (
+      queryResult.amount !== order.total ||
+      !queryResult.transactionId ||
+      !queryResult.paidAt
+    ) {
+      return res.status(502).json({
+        message: "Dữ liệu thanh toán ZaloPay không hợp lệ.",
+      });
+    }
+
+    let updatedOrder: Order | null;
+
+    try {
+      updatedOrder = await markZaloPayOrderPaid({
+        orderId: order.orderId,
+        appTransId: order.zalopayAppTransId,
+        amount: queryResult.amount,
+        transactionId: queryResult.transactionId,
+        paidAt: queryResult.paidAt,
+      });
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.name === "ConditionalCheckFailedException"
+      ) {
+        updatedOrder = await getOrderById(order.orderId);
+      } else {
+        throw error;
+      }
+    }
+
+    return res.json({
+      data: {
+        orderId: updatedOrder?.orderId,
+        paymentStatus: updatedOrder?.paymentStatus,
+        paidAt: updatedOrder?.paidAt,
+        paymentTransactionId: updatedOrder?.paymentTransactionId,
+      },
+    });
+  } catch (error) {
+    console.error(error);
+
+    if (error instanceof ZaloPayPaymentError) {
+      return res.status(502).json({
+        message: error.message,
+      });
+    }
+
+    return res.status(500).json({
+      message: "Không thể truy vấn giao dịch ZaloPay.",
+    });
+  }
+});
 
 app.post("/order-tracking", async (req, res) => {
   try {
