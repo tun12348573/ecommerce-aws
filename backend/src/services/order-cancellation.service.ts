@@ -4,7 +4,7 @@ import {
   TransactWriteCommand,
 } from "@aws-sdk/lib-dynamodb";
 
-import type { Order } from "../types/order";
+import type { Order, OrderStatusHistoryItem } from "../types/order";
 
 const documentClient = DynamoDBDocumentClient.from(
   new DynamoDBClient({
@@ -33,7 +33,9 @@ function getProductQuantities(order: Order): Map<string, number> {
   const quantities = new Map<string, number>();
 
   if (!Array.isArray(order.items) || order.items.length === 0) {
-    throw new OrderCancellationError("Đơn hàng không có sản phẩm để hoàn tồn kho.");
+    throw new OrderCancellationError(
+      "Đơn hàng không có sản phẩm để hoàn tồn kho."
+    );
   }
 
   for (const item of order.items) {
@@ -76,6 +78,11 @@ export async function cancelOrderAndRestock(order: Order): Promise<void> {
 
   const updatedAt = new Date().toISOString();
 
+  const historyItem: OrderStatusHistoryItem = {
+    status: "CANCELLED",
+    changedAt: updatedAt,
+  };
+
   await documentClient.send(
     new TransactWriteCommand({
       TransactItems: [
@@ -86,17 +93,21 @@ export async function cancelOrderAndRestock(order: Order): Promise<void> {
               orderId: order.orderId,
             },
             UpdateExpression:
-              "SET #orderStatus = :cancelled, updatedAt = :updatedAt",
+              "SET #orderStatus = :cancelled, #updatedAt = :updatedAt, #statusHistory = list_append(if_not_exists(#statusHistory, :emptyHistory), :newStatusHistory)",
             ConditionExpression:
               "attribute_exists(orderId) AND #orderStatus IN (:processing, :shipping)",
             ExpressionAttributeNames: {
               "#orderStatus": "orderStatus",
+              "#updatedAt": "updatedAt",
+              "#statusHistory": "statusHistory",
             },
             ExpressionAttributeValues: {
               ":cancelled": "CANCELLED",
               ":processing": "PROCESSING",
               ":shipping": "SHIPPING",
               ":updatedAt": updatedAt,
+              ":emptyHistory": [],
+              ":newStatusHistory": [historyItem],
             },
           },
         },
@@ -122,3 +133,4 @@ export async function cancelOrderAndRestock(order: Order): Promise<void> {
     })
   );
 }
+

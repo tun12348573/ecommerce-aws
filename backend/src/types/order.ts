@@ -8,6 +8,11 @@ export type OrderStatus =
   | "COMPLETED"
   | "CANCELLED";
 
+export type OrderStatusHistoryItem = {
+  status: OrderStatus;
+  changedAt: string;
+};
+
 export type OrderItem = {
   productId: string;
   name: string;
@@ -38,6 +43,8 @@ export type Order = {
   paymentMethod: PaymentMethod;
   paymentStatus: PaymentStatus;
   orderStatus: OrderStatus;
+
+  statusHistory?: OrderStatusHistoryItem[];
 
   createdAt: string;
   updatedAt: string;

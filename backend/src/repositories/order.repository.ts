@@ -11,7 +11,11 @@ import {
   getProductsTableName,
 } from "../shared/dynamodb";
 
-import type { Order, OrderStatus } from "../types/order";
+import type {
+  Order,
+  OrderStatus,
+  OrderStatusHistoryItem,
+} from "../types/order";
 
 export async function listOrders(): Promise<Order[]> {
   const result = await docClient.send(
@@ -26,7 +30,6 @@ export async function listOrders(): Promise<Order[]> {
     return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
   });
 }
-
 
 export async function getOrderById(orderId: string): Promise<Order | null> {
   const result = await docClient.send(
@@ -87,6 +90,13 @@ export async function updateOrderStatus(
   orderId: string,
   orderStatus: OrderStatus
 ): Promise<Order | null> {
+  const changedAt = new Date().toISOString();
+
+  const historyItem: OrderStatusHistoryItem = {
+    status: orderStatus,
+    changedAt,
+  };
+
   const result = await docClient.send(
     new UpdateCommand({
       TableName: getOrdersTableName(),
@@ -94,11 +104,18 @@ export async function updateOrderStatus(
         orderId,
       },
       UpdateExpression:
-        "SET orderStatus = :orderStatus, updatedAt = :updatedAt",
+        "SET #orderStatus = :orderStatus, #updatedAt = :updatedAt, #statusHistory = list_append(if_not_exists(#statusHistory, :emptyHistory), :newStatusHistory)",
       ConditionExpression: "attribute_exists(orderId)",
+      ExpressionAttributeNames: {
+        "#orderStatus": "orderStatus",
+        "#updatedAt": "updatedAt",
+        "#statusHistory": "statusHistory",
+      },
       ExpressionAttributeValues: {
         ":orderStatus": orderStatus,
-        ":updatedAt": new Date().toISOString(),
+        ":updatedAt": changedAt,
+        ":emptyHistory": [],
+        ":newStatusHistory": [historyItem],
       },
       ReturnValues: "ALL_NEW",
     })

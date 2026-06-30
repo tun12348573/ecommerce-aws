@@ -291,6 +291,13 @@ app.post("/orders", async (req, res) => {
       paymentStatus: "PENDING",
       orderStatus: "PROCESSING",
 
+      statusHistory: [
+        {
+          status: "PROCESSING",
+          changedAt: now,
+        },
+      ],
+
       createdAt: now,
       updatedAt: now,
     };
@@ -365,6 +372,16 @@ app.post("/order-tracking", async (req, res) => {
       });
     }
 
+    const statusHistory =
+      order.statusHistory && order.statusHistory.length > 0
+        ? order.statusHistory
+        : [
+            {
+              status: "PROCESSING" as const,
+              changedAt: order.createdAt,
+            },
+          ];
+
     return res.json({
       data: {
         orderId: order.orderId,
@@ -389,6 +406,7 @@ app.post("/order-tracking", async (req, res) => {
         paymentMethod: order.paymentMethod,
         paymentStatus: order.paymentStatus,
         orderStatus: order.orderStatus,
+        statusHistory,
 
         createdAt: order.createdAt,
         updatedAt: order.updatedAt,
