@@ -26,6 +26,14 @@ cache: "force-cache",
 return handleResponse<T>(response);
 }
 
+export async function apiGetLive<T>(path: string): Promise<T> {
+  const response = await fetch(`${getApiUrl()}${path}`, {
+    cache: "no-store",
+  });
+
+  return handleResponse<T>(response);
+}
+
 export async function apiPost<TResponse, TBody>(
 path: string,
 body: TBody

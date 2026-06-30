@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { apiGet } from "@/lib/api";
 import type { Product } from "@/types/product";
+import LiveProductStock from "@/components/products/LiveProductStock";
 
 type ProductsResponse = {
 data: Product[];
@@ -120,7 +121,7 @@ export default async function ProductDetailPage({
             </p>
 
             <p className="font-bold">
-              Còn {product.stock} sản phẩm
+              Còn <LiveProductStock productId={product.productId} /> sản phẩm
             </p>
           </div>
 

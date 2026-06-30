@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Product } from "@/types/product";
 import { AddToCartButton } from "@/components/cart/AddToCartButton";
+import LiveProductStock from "@/components/products/LiveProductStock";
 
 type ProductCardProps = {
   product: Product;
@@ -49,8 +50,8 @@ export function ProductCard({ product }: ProductCardProps) {
           </span>
         </div>
 
-        <div className="mb-4 text-sm text-gray-500">
-          Còn lại: {product.stock} sản phẩm
+        <div className="mt-4">
+          <LiveProductStock productId={product.productId} />
         </div>
 
         <AddToCartButton product={product} />

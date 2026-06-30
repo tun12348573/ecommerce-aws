@@ -1,7 +1,7 @@
 import Link from "next/link";
+import { ProductCard } from "@/components/products/ProductCard";
 import { apiGet } from "@/lib/api";
 import type { Product } from "@/types/product";
-import { ProductCard } from "@/components/products/ProductCard";
 
 type ProductsResponse = {
   data: Product[];
@@ -32,8 +32,8 @@ export default async function ProductsPage() {
               Giỏ hàng
             </Link>
 
-            <Link href="/login" className="text-gray-600 hover:text-black">
-              Đăng nhập
+            <Link href="/track-order" className="text-gray-600 hover:text-black">
+              Tra cứu đơn
             </Link>
           </nav>
         </div>
@@ -50,8 +50,8 @@ export default async function ProductsPage() {
           </h1>
 
           <p className="max-w-2xl text-gray-600">
-            Danh sách sản phẩm được lấy từ backend API local. Sau này dữ liệu
-            này sẽ được chuyển sang DynamoDB trên AWS.
+            Sản phẩm được lấy từ hệ thống AWS. Tồn kho sẽ được cập nhật trực
+            tiếp từ API.
           </p>
         </div>
       </section>
@@ -71,10 +71,11 @@ export default async function ProductsPage() {
 
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {products.map((product) => (
-            <ProductCard key={product.productId} product={product} />
-          ))}
+  <ProductCard key={product.productId} product={product} />
+))}
         </div>
       </section>
     </main>
   );
 }
+
