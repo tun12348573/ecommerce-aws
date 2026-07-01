@@ -221,6 +221,7 @@ ECOMMERCE AWS ADMIN </p>
             <th className="px-5 py-4 font-semibold">Thanh toán</th>
             <th className="px-5 py-4 font-semibold">Trạng thái</th>
             <th className="px-5 py-4 font-semibold">Ngày tạo</th>
+            <th className="px-5 py-4 font-semibold">Chi tiết</th>
           </tr>
         </thead>
 
@@ -228,7 +229,7 @@ ECOMMERCE AWS ADMIN </p>
           {isLoading ? (
             <tr>
               <td
-                colSpan={6}
+                colSpan={7}
                 className="px-5 py-10 text-center text-slate-500"
               >
                 Đang tải đơn hàng...
@@ -239,7 +240,7 @@ ECOMMERCE AWS ADMIN </p>
           {!isLoading && orders.length === 0 ? (
             <tr>
               <td
-                colSpan={6}
+                colSpan={7}
                 className="px-5 py-10 text-center text-slate-500"
               >
                 Chưa có đơn hàng nào.
@@ -317,6 +318,17 @@ ECOMMERCE AWS ADMIN </p>
 
                   <td className="px-5 py-4 text-xs text-slate-500">
                     {formatDate(order.createdAt)}
+                  </td>
+
+                  <td className="px-5 py-4">
+                    <Link
+                      href={`/admin/order-detail/?orderId=${encodeURIComponent(
+                      order.orderId
+                    )}`}
+                      className="inline-flex rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
+                    >
+                      Xem chi tiết
+                    </Link>
                   </td>
                 </tr>
               ))

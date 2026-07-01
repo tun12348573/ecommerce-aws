@@ -10,6 +10,11 @@ export type OrderStatus =
   | "COMPLETED"
   | "CANCELLED";
 
+export type OrderStatusHistoryItem = {
+  status: OrderStatus;
+  changedAt: string;
+};
+
 export type CheckoutCustomer = {
   fullName: string;
   phone: string;
@@ -39,7 +44,16 @@ export type Order = {
 
   paymentMethod: PaymentMethod;
   paymentStatus: PaymentStatus;
+
+  paymentTransactionId?: string;
+  paidAt?: string;
+
+  zalopayAppTransId?: string;
+  zalopayOrderUrl?: string;
+  zalopayPaymentExpiresAt?: string;
+
   orderStatus: OrderStatus;
+  statusHistory?: OrderStatusHistoryItem[];
 
   createdAt: string;
   updatedAt?: string;
@@ -54,4 +68,3 @@ export type CreateOrderRequest = {
 export type OrderResponse = {
   data: Order;
 };
-

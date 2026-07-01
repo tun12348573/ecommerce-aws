@@ -831,6 +831,28 @@ app.get("/admin/orders", async (req, res) => {
   }
 });
 
+app.get("/admin/orders/:orderId", async (req, res) => {
+  try {
+    const order = await getOrderById(req.params.orderId);
+
+    if (!order) {
+      return res.status(404).json({
+        message: "Không tìm thấy đơn hàng.",
+      });
+    }
+
+    return res.json({
+      data: order,
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Không thể lấy chi tiết đơn hàng.",
+    });
+  }
+});
+
 app.patch("/admin/orders/:orderId/status", async (req, res) => {
   try {
     const { orderStatus } = req.body as {
