@@ -281,7 +281,9 @@ ECOMMERCE AWS ADMIN </p>
                     <p className="font-medium text-slate-800">
                       {order.paymentMethod === "COD"
                         ? "Thanh toán khi nhận hàng"
-                        : "Chuyển khoản"}
+                        : order.paymentMethod === "ZALOPAY"
+                          ? "ZaloPay"
+                          : "Chuyển khoản ngân hàng"}
                     </p>
 
                     <p className="mt-1 text-xs text-slate-500">

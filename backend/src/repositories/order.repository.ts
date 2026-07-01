@@ -105,12 +105,47 @@ export async function updateOrderStatus(
   orderId: string,
   orderStatus: OrderStatus
 ): Promise<Order | null> {
-  const changedAt = new Date().toISOString();
+  const existingOrder = await getOrderById(orderId);
 
-  const historyItem: OrderStatusHistoryItem = {
-    status: orderStatus,
-    changedAt,
+  if (!existingOrder) {
+    return null;
+  }
+
+  const now = new Date().toISOString();
+
+  const shouldMarkPaid =
+    orderStatus === "COMPLETED" &&
+    existingOrder.paymentStatus !== "PAID" &&
+    (existingOrder.paymentMethod === "COD" ||
+      existingOrder.paymentMethod === "BANK_TRANSFER");
+
+  const updateParts = [
+    "orderStatus = :orderStatus",
+    "updatedAt = :updatedAt",
+    "statusHistory = list_append(if_not_exists(statusHistory, :emptyStatusHistory), :newStatusHistory)",
+  ];
+
+  const expressionAttributeValues: Record<string, unknown> = {
+    ":orderStatus": orderStatus,
+    ":updatedAt": now,
+    ":emptyStatusHistory": [],
+    ":newStatusHistory": [
+      {
+        status: orderStatus,
+        changedAt: now,
+      },
+    ],
   };
+
+  if (shouldMarkPaid) {
+    updateParts.push(
+      "paymentStatus = :paymentStatus",
+      "paidAt = :paidAt"
+    );
+
+    expressionAttributeValues[":paymentStatus"] = "PAID";
+    expressionAttributeValues[":paidAt"] = now;
+  }
 
   const result = await docClient.send(
     new UpdateCommand({
@@ -118,25 +153,13 @@ export async function updateOrderStatus(
       Key: {
         orderId,
       },
-      UpdateExpression:
-        "SET #orderStatus = :orderStatus, #updatedAt = :updatedAt, #statusHistory = list_append(if_not_exists(#statusHistory, :emptyHistory), :newStatusHistory)",
-      ConditionExpression: "attribute_exists(orderId)",
-      ExpressionAttributeNames: {
-        "#orderStatus": "orderStatus",
-        "#updatedAt": "updatedAt",
-        "#statusHistory": "statusHistory",
-      },
-      ExpressionAttributeValues: {
-        ":orderStatus": orderStatus,
-        ":updatedAt": changedAt,
-        ":emptyHistory": [],
-        ":newStatusHistory": [historyItem],
-      },
+      UpdateExpression: `SET ${updateParts.join(", ")}`,
+      ExpressionAttributeValues: expressionAttributeValues,
       ReturnValues: "ALL_NEW",
     })
   );
 
-  return (result.Attributes as Order) || null;
+  return (result.Attributes as Order | undefined) ?? null;
 }
 
 export async function saveZaloPayPaymentSession(

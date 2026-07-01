@@ -49,6 +49,8 @@ import type {
   PaymentMethod,
 } from "./types/order";
 
+import { buildAdminDashboard } from "./services/admin-dashboard.service";
+
 export const app = express();
 
 app.use(cors());
@@ -788,6 +790,30 @@ app.post("/order-tracking", async (req, res) => {
 // Admin Order APIs
 // =========================
 
+app.get("/admin/dashboard", async (req, res) => {
+  try {
+    const requestedDays = Number(req.query.days);
+
+    const days =
+      requestedDays === 7 ||
+      requestedDays === 14 ||
+      requestedDays === 30
+        ? requestedDays
+        : 14;
+
+    const orders = await listOrders();
+
+    return res.json({
+      data: buildAdminDashboard(orders, days),
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Không thể lấy dữ liệu dashboard.",
+    });
+  }
+});
 
 app.get("/admin/orders", async (req, res) => {
   try {
