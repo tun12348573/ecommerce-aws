@@ -25,6 +25,7 @@ import {
   markZaloPayOrderPaid,
   saveZaloPayPaymentSession,
   updateOrderStatus,
+  updateOrderShipping,
 } from "./repositories/order.repository";
 
 import {
@@ -47,6 +48,7 @@ import type {
   OrderItem,
   OrderStatus,
   PaymentMethod,
+  ShippingCarrier,
 } from "./types/order";
 
 import { buildAdminDashboard } from "./services/admin-dashboard.service";
@@ -771,6 +773,10 @@ app.post("/order-tracking", async (req, res) => {
         paymentMethod: order.paymentMethod,
         paymentStatus: order.paymentStatus,
         orderStatus: order.orderStatus,
+        shippingCarrier: order.shippingCarrier,
+        shippingCarrierName: order.shippingCarrierName,
+        shippingTrackingCode: order.shippingTrackingCode,
+        shippedAt: order.shippedAt,
         statusHistory,
 
         createdAt: order.createdAt,
@@ -849,6 +855,97 @@ app.get("/admin/orders/:orderId", async (req, res) => {
 
     return res.status(500).json({
       message: "Không thể lấy chi tiết đơn hàng.",
+    });
+  }
+});
+
+app.patch("/admin/orders/:orderId/shipping", async (req, res) => {
+  try {
+    const {
+      shippingCarrier,
+      shippingCarrierName,
+      shippingTrackingCode,
+    } = req.body as {
+      shippingCarrier?: unknown;
+      shippingCarrierName?: unknown;
+      shippingTrackingCode?: unknown;
+    };
+
+    const validShippingCarriers: ShippingCarrier[] = [
+      "GHN",
+      "GHTK",
+      "JNT",
+      "VIETTEL_POST",
+      "OTHER",
+    ];
+
+    if (
+      typeof shippingCarrier !== "string" ||
+      !validShippingCarriers.includes(shippingCarrier as ShippingCarrier)
+    ) {
+      return res.status(400).json({
+        message: "Đơn vị giao hàng không hợp lệ.",
+      });
+    }
+
+    if (
+      typeof shippingTrackingCode !== "string" ||
+      shippingTrackingCode.trim().length < 3 ||
+      shippingTrackingCode.trim().length > 100
+    ) {
+      return res.status(400).json({
+        message: "Mã vận đơn phải có từ 3 đến 100 ký tự.",
+      });
+    }
+
+    const carrier = shippingCarrier as ShippingCarrier;
+
+    const carrierName =
+      typeof shippingCarrierName === "string"
+        ? shippingCarrierName.trim()
+        : "";
+
+    if (carrier === "OTHER" && !carrierName) {
+      return res.status(400).json({
+        message: "Vui lòng nhập tên đơn vị giao hàng khác.",
+      });
+    }
+
+    const existingOrder = await getOrderById(req.params.orderId);
+
+    if (!existingOrder) {
+      return res.status(404).json({
+        message: "Không tìm thấy đơn hàng.",
+      });
+    }
+
+    if (existingOrder.orderStatus === "CANCELLED") {
+      return res.status(409).json({
+        message: "Không thể cập nhật vận chuyển cho đơn đã hủy.",
+      });
+    }
+
+    if (existingOrder.orderStatus === "COMPLETED") {
+      return res.status(409).json({
+        message: "Không thể cập nhật vận chuyển cho đơn đã hoàn thành.",
+      });
+    }
+
+    const updatedOrder = await updateOrderShipping({
+      orderId: existingOrder.orderId,
+      shippingCarrier: carrier,
+      shippingCarrierName: carrierName,
+      shippingTrackingCode: shippingTrackingCode.trim(),
+    });
+
+    return res.json({
+      data: updatedOrder,
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Không thể cập nhật thông tin vận chuyển.",
     });
   }
 });

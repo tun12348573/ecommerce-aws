@@ -1,16 +1,33 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  type FormEvent,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { AdminGuard } from "@/components/admin/AdminGuard";
 import { AdminAuthError } from "@/lib/admin-auth";
-import { adminGet } from "@/lib/admin-api";
-import type { Order, OrderStatus } from "@/types/order";
+import { adminGet, adminPatch } from "@/lib/admin-api";
+import type {
+  Order,
+  OrderStatus,
+  ShippingCarrier,
+} from "@/types/order";
 
 type OrderResponse = {
   data: Order;
+};
+
+type ShippingUpdatePayload = {
+  shippingCarrier: ShippingCarrier;
+  shippingCarrierName?: string;
+  shippingTrackingCode: string;
 };
 
 const orderStatusLabels: Record<OrderStatus, string> = {
@@ -18,6 +35,14 @@ const orderStatusLabels: Record<OrderStatus, string> = {
   SHIPPING: "Đang giao",
   COMPLETED: "Hoàn thành",
   CANCELLED: "Đã hủy",
+};
+
+const shippingCarrierLabels: Record<ShippingCarrier, string> = {
+  GHN: "Giao Hàng Nhanh",
+  GHTK: "Giao Hàng Tiết Kiệm",
+  JNT: "J&T Express",
+  VIETTEL_POST: "Viettel Post",
+  OTHER: "Đơn vị khác",
 };
 
 function formatMoney(value: number): string {
@@ -48,6 +73,21 @@ function getPaymentMethodLabel(order: Order): string {
   return "Chuyển khoản ngân hàng";
 }
 
+function getShippingCarrierLabel(order: Order): string {
+  if (!order.shippingCarrier) {
+    return "Chưa cập nhật";
+  }
+
+  if (
+    order.shippingCarrier === "OTHER" &&
+    order.shippingCarrierName?.trim()
+  ) {
+    return order.shippingCarrierName;
+  }
+
+  return shippingCarrierLabels[order.shippingCarrier];
+}
+
 function AdminOrderDetailContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -56,7 +96,9 @@ function AdminOrderDetailContent() {
 
   const [order, setOrder] = useState<Order | null>(null);
   const [isLoading, setIsLoading] = useState(Boolean(orderId));
+  const [isSavingShipping, setIsSavingShipping] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
 
   const handleError = useCallback(
     (error: unknown) => {
@@ -122,6 +164,7 @@ function AdminOrderDetailContent() {
 
     setIsLoading(true);
     setErrorMessage("");
+    setSuccessMessage("");
 
     try {
       const response = await fetchOrder(orderId);
@@ -130,6 +173,88 @@ function AdminOrderDetailContent() {
       handleError(error);
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  async function handleShippingSubmit(
+    event: FormEvent<HTMLFormElement>
+  ) {
+    event.preventDefault();
+
+    if (!order) {
+      return;
+    }
+
+    const formData = new FormData(event.currentTarget);
+
+    const shippingCarrier = formData.get("shippingCarrier");
+    const shippingCarrierName = formData.get("shippingCarrierName");
+    const shippingTrackingCode = formData.get("shippingTrackingCode");
+
+    if (
+      typeof shippingCarrier !== "string" ||
+      typeof shippingTrackingCode !== "string"
+    ) {
+      setErrorMessage("Thông tin vận chuyển không hợp lệ.");
+      return;
+    }
+
+    const validShippingCarriers: ShippingCarrier[] = [
+      "GHN",
+      "GHTK",
+      "JNT",
+      "VIETTEL_POST",
+      "OTHER",
+    ];
+
+    if (
+      !validShippingCarriers.includes(
+        shippingCarrier as ShippingCarrier
+      )
+    ) {
+      setErrorMessage("Đơn vị giao hàng không hợp lệ.");
+      return;
+    }
+
+    const carrier = shippingCarrier as ShippingCarrier;
+    const carrierName =
+      typeof shippingCarrierName === "string"
+        ? shippingCarrierName.trim()
+        : "";
+
+    if (carrier === "OTHER" && !carrierName) {
+      setErrorMessage("Vui lòng nhập tên đơn vị giao hàng khác.");
+      return;
+    }
+
+    if (shippingTrackingCode.trim().length < 3) {
+      setErrorMessage("Mã vận đơn phải có ít nhất 3 ký tự.");
+      return;
+    }
+
+    setIsSavingShipping(true);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    try {
+      const response = await adminPatch<
+        OrderResponse,
+        ShippingUpdatePayload
+      >(`/admin/orders/${order.orderId}/shipping`, {
+        shippingCarrier: carrier,
+        shippingCarrierName:
+          carrier === "OTHER" ? carrierName : undefined,
+        shippingTrackingCode: shippingTrackingCode.trim(),
+      });
+
+      setOrder(response.data);
+      setSuccessMessage(
+        "Đã lưu thông tin vận chuyển và cập nhật đơn sang Đang giao."
+      );
+    } catch (error) {
+      handleError(error);
+    } finally {
+      setIsSavingShipping(false);
     }
   }
 
@@ -157,6 +282,10 @@ function AdminOrderDetailContent() {
       );
     });
   }, [order]);
+
+  const canUpdateShipping =
+    order?.orderStatus === "PROCESSING" ||
+    order?.orderStatus === "SHIPPING";
 
   if (!orderId) {
     return (
@@ -221,6 +350,12 @@ function AdminOrderDetailContent() {
       {errorMessage ? (
         <p className="mt-6 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
           {errorMessage}
+        </p>
+      ) : null}
+
+      {successMessage ? (
+        <p className="mt-6 rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+          {successMessage}
         </p>
       ) : null}
 
@@ -289,6 +424,86 @@ function AdminOrderDetailContent() {
 
             <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
               <h2 className="text-xl font-bold text-slate-900">
+                Cập nhật vận chuyển
+              </h2>
+
+              <p className="mt-2 text-sm text-slate-500">
+                Lưu mã vận đơn sẽ tự động chuyển đơn sang trạng thái Đang giao.
+              </p>
+
+              {canUpdateShipping ? (
+                <form
+                  key={`${order.orderId}-${order.updatedAt ?? order.createdAt}`}
+                  onSubmit={handleShippingSubmit}
+                  className="mt-6 space-y-5"
+                >
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold text-slate-700">
+                      Đơn vị giao hàng
+                    </label>
+
+                    <select
+                      name="shippingCarrier"
+                      defaultValue={order.shippingCarrier ?? "GHN"}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-slate-900"
+                    >
+                      <option value="GHN">Giao Hàng Nhanh</option>
+                      <option value="GHTK">Giao Hàng Tiết Kiệm</option>
+                      <option value="JNT">J&T Express</option>
+                      <option value="VIETTEL_POST">Viettel Post</option>
+                      <option value="OTHER">Đơn vị khác</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold text-slate-700">
+                      Tên đơn vị khác
+                    </label>
+
+                    <input
+                      name="shippingCarrierName"
+                      defaultValue={order.shippingCarrierName ?? ""}
+                      className="w-full rounded-lg border border-slate-300 px-4 py-3 text-sm outline-none focus:border-slate-900"
+                      placeholder="Chỉ nhập khi chọn Đơn vị khác"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold text-slate-700">
+                      Mã vận đơn
+                    </label>
+
+                    <input
+                      required
+                      name="shippingTrackingCode"
+                      defaultValue={order.shippingTrackingCode ?? ""}
+                      className="w-full rounded-lg border border-slate-300 px-4 py-3 font-mono text-sm outline-none focus:border-slate-900"
+                      placeholder="Ví dụ: GHN123456789"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isSavingShipping}
+                    className="rounded-lg bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isSavingShipping
+                      ? "Đang lưu..."
+                      : order.orderStatus === "SHIPPING"
+                        ? "Lưu mã vận đơn"
+                        : "Lưu và chuyển sang Đang giao"}
+                  </button>
+                </form>
+              ) : (
+                <p className="mt-5 rounded-lg bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                  Đơn đã hoàn thành hoặc đã hủy nên không thể cập nhật vận
+                  chuyển.
+                </p>
+              )}
+            </section>
+
+            <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+              <h2 className="text-xl font-bold text-slate-900">
                 Timeline trạng thái đơn
               </h2>
 
@@ -299,8 +514,11 @@ function AdminOrderDetailContent() {
               ) : (
                 <ol className="mt-6 space-y-5 border-l-2 border-slate-200 pl-6">
                   {statusHistory.map((historyItem, index) => (
-                    <li key={`${historyItem.status}-${historyItem.changedAt}`}>
-                      <span className="absolute -ml-8.25 mt-1.5 h-3 w-3 rounded-full bg-slate-900" />
+                    <li
+                      key={`${historyItem.status}-${historyItem.changedAt}`}
+                      className="relative"
+                    >
+                      <span className="absolute -left-7.75 top-1.5 h-3 w-3 rounded-full bg-slate-900" />
 
                       <p className="font-semibold text-slate-900">
                         {orderStatusLabels[historyItem.status]}
@@ -355,6 +573,35 @@ function AdminOrderDetailContent() {
                   <p className="text-slate-500">Phương thức</p>
                   <p className="mt-1 font-semibold text-slate-900">
                     {getPaymentMethodLabel(order)}
+                  </p>
+                </div>
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+              <h2 className="text-lg font-bold text-slate-900">
+                Thông tin vận chuyển
+              </h2>
+
+              <div className="mt-4 space-y-4 text-sm">
+                <div>
+                  <p className="text-slate-500">Đơn vị giao hàng</p>
+                  <p className="mt-1 font-semibold text-slate-900">
+                    {getShippingCarrierLabel(order)}
+                  </p>
+                </div>
+
+                <div>
+                  <p className="text-slate-500">Mã vận đơn</p>
+                  <p className="mt-1 break-all font-mono text-xs font-semibold text-slate-900">
+                    {order.shippingTrackingCode ?? "Chưa có"}
+                  </p>
+                </div>
+
+                <div>
+                  <p className="text-slate-500">Thời gian bàn giao</p>
+                  <p className="mt-1 font-semibold text-slate-900">
+                    {formatDate(order.shippedAt)}
                   </p>
                 </div>
               </div>

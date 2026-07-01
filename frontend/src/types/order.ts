@@ -10,6 +10,13 @@ export type OrderStatus =
   | "COMPLETED"
   | "CANCELLED";
 
+export type ShippingCarrier =
+  | "GHN"
+  | "GHTK"
+  | "JNT"
+  | "VIETTEL_POST"
+  | "OTHER";
+
 export type OrderStatusHistoryItem = {
   status: OrderStatus;
   changedAt: string;
@@ -53,6 +60,10 @@ export type Order = {
   zalopayPaymentExpiresAt?: string;
 
   orderStatus: OrderStatus;
+  shippingCarrier?: ShippingCarrier;
+  shippingCarrierName?: string;
+  shippingTrackingCode?: string;
+  shippedAt?: string;
   statusHistory?: OrderStatusHistoryItem[];
 
   createdAt: string;
@@ -68,3 +79,4 @@ export type CreateOrderRequest = {
 export type OrderResponse = {
   data: Order;
 };
+

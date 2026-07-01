@@ -15,6 +15,7 @@ import type {
   Order,
   OrderStatus,
   OrderStatusHistoryItem,
+  ShippingCarrier,
 } from "../types/order";
 
 type SaveZaloPayPaymentSessionInput = {
@@ -30,6 +31,13 @@ type MarkZaloPayOrderPaidInput = {
   amount: number;
   transactionId: string;
   paidAt: string;
+};
+
+type UpdateOrderShippingInput = {
+  orderId: string;
+  shippingCarrier: ShippingCarrier;
+  shippingCarrierName?: string;
+  shippingTrackingCode: string;
 };
 
 export async function listOrders(): Promise<Order[]> {
@@ -239,5 +247,78 @@ export async function markZaloPayOrderPaid(
   );
 
   return (result.Attributes as Order) || null;
+}
+
+export async function updateOrderShipping(
+  input: UpdateOrderShippingInput
+): Promise<Order | null> {
+  const existingOrder = await getOrderById(input.orderId);
+
+  if (!existingOrder) {
+    return null;
+  }
+
+  const now = new Date().toISOString();
+
+  const setParts = [
+    "#shippingCarrier = :shippingCarrier",
+    "#shippingCarrierName = :shippingCarrierName",
+    "#shippingTrackingCode = :shippingTrackingCode",
+    "#orderStatus = :shippingStatus",
+    "#updatedAt = :updatedAt",
+  ];
+
+  const expressionAttributeNames: Record<string, string> = {
+    "#shippingCarrier": "shippingCarrier",
+    "#shippingCarrierName": "shippingCarrierName",
+    "#shippingTrackingCode": "shippingTrackingCode",
+    "#orderStatus": "orderStatus",
+    "#updatedAt": "updatedAt",
+  };
+
+  const expressionAttributeValues: Record<string, unknown> = {
+    ":shippingCarrier": input.shippingCarrier,
+    ":shippingCarrierName":
+      input.shippingCarrier === "OTHER"
+        ? input.shippingCarrierName?.trim() || ""
+        : "",
+    ":shippingTrackingCode": input.shippingTrackingCode.trim(),
+    ":shippingStatus": "SHIPPING",
+    ":updatedAt": now,
+  };
+
+  if (existingOrder.orderStatus !== "SHIPPING") {
+    setParts.push(
+      "#shippedAt = :shippedAt",
+      "#statusHistory = list_append(if_not_exists(#statusHistory, :emptyStatusHistory), :shippingStatusHistory)"
+    );
+
+    expressionAttributeNames["#shippedAt"] = "shippedAt";
+    expressionAttributeNames["#statusHistory"] = "statusHistory";
+
+    expressionAttributeValues[":shippedAt"] = now;
+    expressionAttributeValues[":emptyStatusHistory"] = [];
+    expressionAttributeValues[":shippingStatusHistory"] = [
+      {
+        status: "SHIPPING",
+        changedAt: now,
+      },
+    ];
+  }
+
+  const result = await docClient.send(
+    new UpdateCommand({
+      TableName: getOrdersTableName(),
+      Key: {
+        orderId: input.orderId,
+      },
+      UpdateExpression: `SET ${setParts.join(", ")}`,
+      ExpressionAttributeNames: expressionAttributeNames,
+      ExpressionAttributeValues: expressionAttributeValues,
+      ReturnValues: "ALL_NEW",
+    })
+  );
+
+  return (result.Attributes as Order | undefined) ?? null;
 }
 

@@ -11,9 +11,16 @@ type OrderStatus =
   | "COMPLETED"
   | "CANCELLED";
 
-type PaymentMethod = "COD" | "BANK_TRANSFER";
+type PaymentMethod = "COD" | "BANK_TRANSFER" | "ZALOPAY";
 
 type PaymentStatus = "PENDING" | "PAID";
+
+type ShippingCarrier =
+  | "GHN"
+  | "GHTK"
+  | "JNT"
+  | "VIETTEL_POST"
+  | "OTHER";
 
 type OrderStatusHistoryItem = {
   status: OrderStatus;
@@ -42,8 +49,14 @@ type OrderTrackingResult = {
 
   paymentMethod: PaymentMethod;
   paymentStatus: PaymentStatus;
+
   orderStatus: OrderStatus;
   statusHistory?: OrderStatusHistoryItem[];
+
+  shippingCarrier?: ShippingCarrier;
+  shippingCarrierName?: string;
+  shippingTrackingCode?: string;
+  shippedAt?: string;
 
   createdAt: string;
   updatedAt?: string;
@@ -67,6 +80,14 @@ const orderStatusDescriptions: Record<OrderStatus, string> = {
   CANCELLED: "Đơn hàng đã được hủy.",
 };
 
+const shippingCarrierLabels: Record<ShippingCarrier, string> = {
+  GHN: "Giao Hàng Nhanh",
+  GHTK: "Giao Hàng Tiết Kiệm",
+  JNT: "J&T Express",
+  VIETTEL_POST: "Viettel Post",
+  OTHER: "Đơn vị khác",
+};
+
 function formatMoney(value: number): string {
   return new Intl.NumberFormat("vi-VN", {
     style: "currency",
@@ -75,15 +96,51 @@ function formatMoney(value: number): string {
   }).format(value);
 }
 
-function formatDate(value: string): string {
+function formatDate(value?: string): string {
+  if (!value) {
+    return "Chưa có";
+  }
+
   return new Date(value).toLocaleString("vi-VN");
+}
+
+function getPaymentMethodLabel(paymentMethod: PaymentMethod): string {
+  if (paymentMethod === "COD") {
+    return "Thanh toán khi nhận hàng";
+  }
+
+  if (paymentMethod === "ZALOPAY") {
+    return "ZaloPay";
+  }
+
+  return "Chuyển khoản ngân hàng";
+}
+
+function getShippingCarrierLabel(order: OrderTrackingResult): string {
+  if (!order.shippingCarrier) {
+    return "Chưa cập nhật";
+  }
+
+  if (
+    order.shippingCarrier === "OTHER" &&
+    order.shippingCarrierName?.trim()
+  ) {
+    return order.shippingCarrierName;
+  }
+
+  return shippingCarrierLabels[order.shippingCarrier];
 }
 
 function getTrackingHistory(
   order: OrderTrackingResult
 ): OrderStatusHistoryItem[] {
   const history = Array.isArray(order.statusHistory)
-    ? [...order.statusHistory]
+    ? [...order.statusHistory].sort((first, second) => {
+        return (
+          new Date(first.changedAt).getTime() -
+          new Date(second.changedAt).getTime()
+        );
+      })
     : [];
 
   if (history.length === 0) {
@@ -115,6 +172,19 @@ function getTimelineColor(status: OrderStatus, isLatest: boolean): string {
   }
 
   return "bg-emerald-100 text-emerald-700 ring-emerald-200";
+}
+
+function getTimelineDescription(
+  order: OrderTrackingResult,
+  status: OrderStatus
+): string {
+  if (status === "SHIPPING" && order.shippingTrackingCode) {
+    return `Đơn hàng đã bàn giao cho ${getShippingCarrierLabel(
+      order
+    )}. Mã vận đơn: ${order.shippingTrackingCode}.`;
+  }
+
+  return orderStatusDescriptions[status];
 }
 
 export default function TrackOrderPage() {
@@ -288,9 +358,7 @@ export default function TrackOrderPage() {
                   </p>
 
                   <p className="mt-2 text-sm font-medium text-slate-900">
-                    {order.paymentMethod === "COD"
-                      ? "Thanh toán khi nhận hàng"
-                      : "Chuyển khoản"}
+                    {getPaymentMethodLabel(order.paymentMethod)}
                   </p>
                 </div>
 
@@ -299,11 +367,55 @@ export default function TrackOrderPage() {
                     Trạng thái thanh toán
                   </p>
 
-                  <p className="mt-2 text-sm font-medium text-slate-900">
+                  <p
+                    className={`mt-2 text-sm font-medium ${
+                      order.paymentStatus === "PAID"
+                        ? "text-emerald-600"
+                        : "text-amber-600"
+                    }`}
+                  >
                     {order.paymentStatus === "PAID"
                       ? "Đã thanh toán"
                       : "Chờ thanh toán"}
                   </p>
+                </div>
+              </div>
+
+              <div className="mt-7 rounded-xl border border-slate-200 bg-slate-50 p-5">
+                <p className="text-sm font-semibold text-slate-900">
+                  Thông tin vận chuyển
+                </p>
+
+                <div className="mt-4 grid gap-4 sm:grid-cols-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Đơn vị giao hàng
+                    </p>
+
+                    <p className="mt-2 text-sm font-semibold text-slate-900">
+                      {getShippingCarrierLabel(order)}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Mã vận đơn
+                    </p>
+
+                    <p className="mt-2 break-all font-mono text-sm font-semibold text-slate-900">
+                      {order.shippingTrackingCode ?? "Chưa có"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Thời gian bàn giao
+                    </p>
+
+                    <p className="mt-2 text-sm font-semibold text-slate-900">
+                      {formatDate(order.shippedAt)}
+                    </p>
+                  </div>
                 </div>
               </div>
 
@@ -341,7 +453,7 @@ export default function TrackOrderPage() {
                           </p>
 
                           <p className="mt-1 text-sm text-slate-600">
-                            {orderStatusDescriptions[entry.status]}
+                            {getTimelineDescription(order, entry.status)}
                           </p>
 
                           <p className="mt-1 text-xs text-slate-500">
