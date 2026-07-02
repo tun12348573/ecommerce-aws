@@ -523,6 +523,46 @@ app.get("/account/orders", async (req, res) => {
   }
 });
 
+app.get("/account/orders/:orderId", async (req, res) => {
+  const authenticatedCustomer = getAuthenticatedCustomer(req);
+
+  if (!authenticatedCustomer) {
+    return res.status(401).json({
+      message: "Không thể xác thực tài khoản khách hàng.",
+    });
+  }
+
+  try {
+    const orderId = req.params.orderId.trim();
+
+    if (!orderId) {
+      return res.status(400).json({
+        message: "Mã đơn hàng không hợp lệ.",
+      });
+    }
+
+    const order = await getOrderById(orderId);
+
+    if (
+      !order ||
+      order.customerUserId !== authenticatedCustomer.userId
+    ) {
+      return res.status(404).json({
+        message: "Không tìm thấy đơn hàng của tài khoản này.",
+      });
+    }
+
+    return res.json({
+      data: order,
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Không thể lấy chi tiết đơn hàng.",
+    });
+  }
+});
 // =========================
 // ZaloPay Sandbox Payment APIs
 // =========================

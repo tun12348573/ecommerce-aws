@@ -294,14 +294,23 @@ export default function CustomerOrdersPage() {
                   </div>
                 </div>
 
-                <div className="mt-5 border-t border-slate-100 pt-5">
-                  <Link
-                    href={`/track-order/?orderId=${encodeURIComponent(
-                      order.orderId
-                    )}`}
-                    className="text-sm font-semibold text-slate-700 underline"
+                <div className="mt-5 flex flex-wrap gap-4 border-t border-slate-100 pt-5">
+              <Link
+                href={`/account/order-detail/?orderId=${encodeURIComponent(
+                  order.orderId
+                )}`}
+                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700"
+              >
+                Xem chi tiết
+              </Link>
+
+                <Link
+                  href={`/track-order/?orderId=${encodeURIComponent(
+                  order.orderId
+                )}`}
+                  className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
                   >
-                    Tra cứu hành trình đơn hàng
+                  Tra cứu công khai
                   </Link>
                 </div>
               </article>
