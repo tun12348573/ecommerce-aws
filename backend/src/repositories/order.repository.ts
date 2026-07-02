@@ -54,6 +54,32 @@ export async function listOrders(): Promise<Order[]> {
   });
 }
 
+export async function listOrdersByCustomerUserId(
+  customerUserId: string
+): Promise<Order[]> {
+  const result = await docClient.send(
+    new ScanCommand({
+      TableName: getOrdersTableName(),
+      FilterExpression: "#customerUserId = :customerUserId",
+      ExpressionAttributeNames: {
+        "#customerUserId": "customerUserId",
+      },
+      ExpressionAttributeValues: {
+        ":customerUserId": customerUserId,
+      },
+    })
+  );
+
+  const orders = (result.Items ?? []) as Order[];
+
+  return orders.sort((first, second) => {
+    return (
+      new Date(second.createdAt).getTime() -
+      new Date(first.createdAt).getTime()
+    );
+  });
+}
+
 export async function getOrderById(orderId: string): Promise<Order | null> {
   const result = await docClient.send(
     new GetCommand({

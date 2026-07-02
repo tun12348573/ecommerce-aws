@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 
 import cors from "cors";
 import express from "express";
+import type { Request, Response } from "express";
 
 import {
   createProductImageUploadUrl,
@@ -28,6 +29,7 @@ import {
   createOrderAndDecrementStock,
   getOrderById,
   listOrders,
+  listOrdersByCustomerUserId,
   markZaloPayOrderPaid,
   saveZaloPayPaymentSession,
   updateOrderStatus,
@@ -230,141 +232,296 @@ app.get("/products/:slug", async (req, res) => {
 // Order APIs
 // =========================
 
-app.post("/orders", async (req, res) => {
-  try {
-    const body = req.body as {
-      items?: unknown;
-      customer?: CustomerInfo;
-      paymentMethod?: PaymentMethod;
-    };
+type CreateOrderBody = {
+  items?: unknown;
+  customer?: CustomerInfo;
+  paymentMethod?: unknown;
+};
 
-    const checkoutItems = normalizeCheckoutItems(body.items);
+type AuthenticatedCustomer = {
+  userId: string;
+  email: string;
+};
 
-    if (!checkoutItems) {
-      return res.status(400).json({
-        message: "Cart is empty or invalid",
-      });
-    }
+function getAuthenticatedCustomer(req: Request): AuthenticatedCustomer | null {
+  const authorization = req.get("authorization");
+  const token = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
 
-    const customer = body.customer;
-
-    if (
-      !customer ||
-      !customer.fullName?.trim() ||
-      !customer.phone?.trim() ||
-      !customer.email?.trim() ||
-      !customer.address?.trim()
-    ) {
-      return res.status(400).json({
-        message: "Customer information is required",
-      });
-    }
-
-    const orderItems: OrderItem[] = [];
-
-    for (const item of checkoutItems) {
-      const product = await getProductById(item.productId);
-
-      if (!product) {
-        return res.status(404).json({
-          message: `Product ${item.productId} not found`,
-        });
-      }
-
-      if (item.quantity > product.stock) {
-        return res.status(409).json({
-          message: `${product.name} does not have enough stock`,
-        });
-      }
-
-      orderItems.push({
-        productId: product.productId,
-        name: product.name,
-        slug: product.slug,
-        price: product.price,
-        salePrice: product.salePrice,
-        quantity: item.quantity,
-      });
-    }
-
-    const subtotal = orderItems.reduce((total, item) => {
-      return total + item.salePrice * item.quantity;
-    }, 0);
-
-    const shippingFee = 30000;
-    const discount = 0;
-    const now = new Date().toISOString();
-
-    let paymentMethod: PaymentMethod = "COD";
-
-if (body.paymentMethod !== undefined) {
-  if (
-    body.paymentMethod !== "COD" &&
-    body.paymentMethod !== "BANK_TRANSFER" &&
-    body.paymentMethod !== "ZALOPAY"
-  ) {
-    return res.status(400).json({
-      message: "Phương thức thanh toán không hợp lệ.",
-    });
+  if (!token) {
+    return null;
   }
 
-  paymentMethod = body.paymentMethod;
-}
+  try {
+    const payloadSegment = token.split(".")[1];
 
-    const order: Order = {
-      orderId: `ord_${randomUUID()}`,
-      customer,
-      items: orderItems,
+    if (!payloadSegment) {
+      return null;
+    }
 
-      subtotal,
-      shippingFee,
-      discount,
-      total: subtotal + shippingFee - discount,
-
-      paymentMethod,
-      paymentStatus: "PENDING",
-      orderStatus: "PROCESSING",
-
-      statusHistory: [
-        {
-          status: "PROCESSING",
-          changedAt: now,
-        },
-      ],
-
-      createdAt: now,
-      updatedAt: now,
+    const claims = JSON.parse(
+      Buffer.from(payloadSegment, "base64url").toString("utf8")
+    ) as {
+      sub?: unknown;
+      email?: unknown;
+      token_use?: unknown;
     };
 
-    try {
-      await createOrderAndDecrementStock(order);
-      await sendOrderCreatedEmail(order);
-    } catch (error) {
-      if (
-        error instanceof Error &&
-        error.name === "TransactionCanceledException"
-      ) {
-        return res.status(409).json({
-          message:
-            "Không thể tạo đơn hàng vì tồn kho vừa thay đổi. Hãy kiểm tra lại giỏ hàng.",
-        });
-      }
+    if (
+      claims.token_use !== "id" ||
+      typeof claims.sub !== "string" ||
+      !claims.sub.trim() ||
+      typeof claims.email !== "string" ||
+      !claims.email.trim()
+    ) {
+      return null;
+    }
+
+    return {
+      userId: claims.sub,
+      email: claims.email.trim().toLowerCase(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function parsePaymentMethod(value: unknown): PaymentMethod | null {
+  if (
+    value === "COD" ||
+    value === "BANK_TRANSFER" ||
+    value === "ZALOPAY"
+  ) {
+    return value;
+  }
+
+  return null;
+}
+
+async function createOrderFromCheckout(
+  body: CreateOrderBody,
+  authenticatedCustomer?: AuthenticatedCustomer
+): Promise<Order> {
+  const checkoutItems = normalizeCheckoutItems(body.items);
+
+  if (!checkoutItems) {
+    throw new Error("Cart is empty or invalid");
+  }
+
+  const rawCustomer = body.customer;
+
+  if (
+    !rawCustomer ||
+    !rawCustomer.fullName?.trim() ||
+    !rawCustomer.phone?.trim() ||
+    !rawCustomer.address?.trim() ||
+    (!authenticatedCustomer && !rawCustomer.email?.trim())
+  ) {
+    throw new Error("Customer information is required");
+  }
+
+  const paymentMethod =
+    body.paymentMethod === undefined
+      ? "COD"
+      : parsePaymentMethod(body.paymentMethod);
+
+  if (!paymentMethod) {
+    throw new Error("Phương thức thanh toán không hợp lệ.");
+  }
+
+  const customer: CustomerInfo = {
+    fullName: rawCustomer.fullName.trim(),
+    phone: rawCustomer.phone.trim(),
+    email:
+      authenticatedCustomer?.email ??
+      rawCustomer.email.trim().toLowerCase(),
+    address: rawCustomer.address.trim(),
+    note: rawCustomer.note?.trim() || undefined,
+  };
+
+  const orderItems: OrderItem[] = [];
+
+  for (const item of checkoutItems) {
+    const product = await getProductById(item.productId);
+
+    if (!product) {
+      throw new Error(`Product ${item.productId} not found`);
+    }
+
+    if (item.quantity > product.stock) {
+      const error = new Error(
+        `${product.name} does not have enough stock`
+      );
+
+      error.name = "InsufficientStockError";
 
       throw error;
     }
+
+    orderItems.push({
+      productId: product.productId,
+      name: product.name,
+      slug: product.slug,
+      price: product.price,
+      salePrice: product.salePrice,
+      quantity: item.quantity,
+    });
+  }
+
+  const subtotal = orderItems.reduce((total, item) => {
+    return total + item.salePrice * item.quantity;
+  }, 0);
+
+  const shippingFee = 30000;
+  const discount = 0;
+  const now = new Date().toISOString();
+
+  const order: Order = {
+    orderId: `ord_${randomUUID()}`,
+    customer,
+    customerUserId: authenticatedCustomer?.userId,
+    items: orderItems,
+
+    subtotal,
+    shippingFee,
+    discount,
+    total: subtotal + shippingFee - discount,
+
+    paymentMethod,
+    paymentStatus: "PENDING",
+    orderStatus: "PROCESSING",
+
+    statusHistory: [
+      {
+        status: "PROCESSING",
+        changedAt: now,
+      },
+    ],
+
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  try {
+    await createOrderAndDecrementStock(order);
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.name === "TransactionCanceledException"
+    ) {
+      const stockError = new Error(
+        "Không thể tạo đơn hàng vì tồn kho vừa thay đổi. Hãy kiểm tra lại giỏ hàng."
+      );
+
+      stockError.name = "InsufficientStockError";
+
+      throw stockError;
+    }
+
+    throw error;
+  }
+
+  await sendOrderCreatedEmail(order);
+
+  return order;
+}
+
+function sendOrderCreationError(res: Response, error: unknown) {
+  if (error instanceof Error) {
+    if (
+      error.name === "InsufficientStockError" ||
+      error.message.includes("does not have enough stock")
+    ) {
+      return res.status(409).json({
+        message: error.message,
+      });
+    }
+
+    if (
+      error.message === "Cart is empty or invalid" ||
+      error.message === "Customer information is required" ||
+      error.message === "Phương thức thanh toán không hợp lệ."
+    ) {
+      return res.status(400).json({
+        message: error.message,
+      });
+    }
+
+    if (error.message.includes("not found")) {
+      return res.status(404).json({
+        message: error.message,
+      });
+    }
+  }
+
+  console.error(error);
+
+  return res.status(500).json({
+    message: "Cannot create order",
+  });
+}
+
+app.post("/orders", async (req, res) => {
+  try {
+    const order = await createOrderFromCheckout(
+      req.body as CreateOrderBody
+    );
 
     return res.status(201).json({
       data: order,
     });
   } catch (error) {
-    console.error(error);
-
-    return res.status(500).json({
-      message: "Cannot create order",
-    });
+    return sendOrderCreationError(res, error);
   }
 });
 
+app.post("/account/orders", async (req, res) => {
+  const authenticatedCustomer = getAuthenticatedCustomer(req);
+
+  if (!authenticatedCustomer) {
+    return res.status(401).json({
+      message: "Không thể xác thực tài khoản khách hàng.",
+    });
+  }
+
+  try {
+    const order = await createOrderFromCheckout(
+      req.body as CreateOrderBody,
+      authenticatedCustomer
+    );
+
+    return res.status(201).json({
+      data: order,
+    });
+  } catch (error) {
+    return sendOrderCreationError(res, error);
+  }
+});
+
+app.get("/account/orders", async (req, res) => {
+  const authenticatedCustomer = getAuthenticatedCustomer(req);
+
+  if (!authenticatedCustomer) {
+    return res.status(401).json({
+      message: "Không thể xác thực tài khoản khách hàng.",
+    });
+  }
+
+  try {
+    const orders = await listOrdersByCustomerUserId(
+      authenticatedCustomer.userId
+    );
+
+    return res.json({
+      data: orders,
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Không thể lấy lịch sử đơn hàng.",
+    });
+  }
+});
 
 // =========================
 // ZaloPay Sandbox Payment APIs

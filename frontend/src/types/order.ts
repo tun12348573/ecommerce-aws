@@ -41,6 +41,7 @@ export type OrderItem = {
 
 export type Order = {
   orderId: string;
+  customerUserId?: string;
   customer: CheckoutCustomer;
   items: OrderItem[];
 

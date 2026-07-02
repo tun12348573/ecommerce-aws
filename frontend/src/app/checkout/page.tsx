@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { type FormEvent, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { apiPost } from "@/lib/api";
+import { customerPost } from "@/lib/customer-api";
+import { getCustomerUsername } from "@/lib/customer-auth";
 import { clearCart } from "@/lib/cart";
 import { useCartItems } from "@/hooks/useCartItems";
 import type {
@@ -41,6 +43,29 @@ export default function CheckoutPage() {
     address: "",
     note: "",
   });
+
+  const [customerAccountEmail, setCustomerAccountEmail] = useState<
+    string | null
+  >(null);
+
+  useEffect(() => {
+    const timerId = window.setTimeout(() => {
+      const signedInEmail = getCustomerUsername();
+
+      setCustomerAccountEmail(signedInEmail);
+
+      if (signedInEmail) {
+        setCustomer((currentCustomer) => ({
+          ...currentCustomer,
+          email: currentCustomer.email || signedInEmail,
+        }));
+      }
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timerId);
+    };
+  }, []);
 
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("COD");
   const [error, setError] = useState("");
@@ -85,12 +110,23 @@ export default function CheckoutPage() {
         paymentMethod,
       };
 
-      const orderResponse = await apiPost<OrderResponse, CreateOrderRequest>(
-        "/orders",
-        payload
-      );
+      const orderResponse = customerAccountEmail
+        ? await customerPost<OrderResponse, CreateOrderRequest>(
+            "/account/orders",
+            payload
+          )
+        : await apiPost<OrderResponse, CreateOrderRequest>(
+            "/orders",
+            payload
+          );
 
-      createdOrderId = orderResponse.data.orderId;
+      const newOrderId = orderResponse.data.orderId;
+
+      if (!newOrderId) {
+        throw new Error("API tạo đơn không trả về mã đơn hàng.");
+      }
+
+      createdOrderId = newOrderId;
 
       window.sessionStorage.setItem(
         `aws-shop-zalopay-phone:${createdOrderId}`,
@@ -107,7 +143,7 @@ export default function CheckoutPage() {
             phone: string;
           }
         >("/payments/zalopay/create", {
-          orderId: createdOrderId,
+          orderId: newOrderId,
           phone: customer.phone.trim(),
         });
 
@@ -117,7 +153,7 @@ export default function CheckoutPage() {
 
       router.replace(
         `/checkout/success/?orderId=${encodeURIComponent(
-          createdOrderId
+          newOrderId
         )}&paymentMethod=${paymentMethod}`
       );
     } catch (error) {
@@ -169,6 +205,13 @@ export default function CheckoutPage() {
             <Link href="/cart/" className="text-gray-600 hover:text-black">
               Giỏ hàng
             </Link>
+
+            <Link
+              href={customerAccountEmail ? "/account/orders/" : "/account/login/"}
+              className="text-gray-600 hover:text-black"
+            >
+              {customerAccountEmail ? "Đơn hàng của tôi" : "Đăng nhập"}
+            </Link>
           </nav>
         </div>
       </header>
@@ -181,6 +224,30 @@ export default function CheckoutPage() {
 
           <h1 className="text-4xl font-extrabold">Hoàn tất đơn hàng</h1>
         </div>
+
+        {customerAccountEmail ? (
+          <div className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-800">
+            Bạn đang đặt hàng bằng tài khoản{" "}
+            <span className="font-semibold">{customerAccountEmail}</span>. Đơn
+            hàng này sẽ xuất hiện trong{" "}
+            <Link href="/account/orders/" className="font-semibold underline">
+              Đơn hàng của tôi
+            </Link>
+            .
+          </div>
+        ) : (
+          <div className="mb-6 rounded-2xl border border-slate-200 bg-white px-5 py-4 text-sm text-slate-700">
+            Đăng nhập để lưu đơn hàng vào tài khoản và theo dõi lịch sử mua
+            sắm.
+            {" "}
+            <Link
+              href="/account/login/"
+              className="font-semibold text-slate-950 underline"
+            >
+              Đăng nhập
+            </Link>
+          </div>
+        )}
 
         {items.length === 0 ? (
           <div className="rounded-3xl bg-white p-10 text-center shadow-sm">
@@ -250,12 +317,19 @@ export default function CheckoutPage() {
                       required
                       type="email"
                       value={customer.email}
+                      readOnly={Boolean(customerAccountEmail)}
                       onChange={(event) =>
                         updateCustomerField("email", event.target.value)
                       }
-                      className="w-full rounded-xl border px-4 py-3"
+                      className="w-full rounded-xl border px-4 py-3 read-only:bg-slate-100"
                       placeholder="you@example.com"
                     />
+
+                    {customerAccountEmail ? (
+                      <p className="mt-2 text-xs text-slate-500">
+                        Email được lấy từ tài khoản đã đăng nhập.
+                      </p>
+                    ) : null}
                   </div>
 
                   <div className="md:col-span-2">

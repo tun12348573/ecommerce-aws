@@ -40,6 +40,13 @@ export type CustomerInfo = {
 export type Order = {
   orderId: string;
   customer: CustomerInfo;
+
+  /**
+   * Cognito subject (`sub`) of the signed-in customer.
+   * Undefined for guest checkout orders created before/without sign-in.
+   */
+  customerUserId?: string;
+
   items: OrderItem[];
 
   subtotal: number;
@@ -67,4 +74,3 @@ export type Order = {
   createdAt: string;
   updatedAt: string;
 };
-
