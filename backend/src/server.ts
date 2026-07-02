@@ -10,6 +10,12 @@ import {
 } from "./services/product-image-upload.service";
 
 import {
+  sendOrderCreatedEmail,
+  sendPaymentConfirmedEmail,
+  sendShippingUpdatedEmail,
+} from "./services/order-email.service";
+
+import {
   createProduct,
   deleteProductById,
   getProductById,
@@ -332,6 +338,7 @@ if (body.paymentMethod !== undefined) {
 
     try {
       await createOrderAndDecrementStock(order);
+      await sendOrderCreatedEmail(order);
     } catch (error) {
       if (
         error instanceof Error &&
@@ -532,13 +539,16 @@ app.post("/payments/zalopay/callback", async (req, res) => {
     }
 
     try {
-      await markZaloPayOrderPaid({
+      const paidOrder = await markZaloPayOrderPaid({
         orderId: order.orderId,
         appTransId: callback.app_trans_id,
         amount: callback.amount,
         transactionId: String(callback.zp_trans_id),
         paidAt: new Date(callback.server_time).toISOString(),
       });
+      if (paidOrder) {
+        await sendPaymentConfirmedEmail(paidOrder);
+      }
     } catch (error) {
       if (
         error instanceof Error &&
@@ -655,6 +665,7 @@ app.post("/payments/zalopay/query", async (req, res) => {
     }
 
     let updatedOrder: Order | null;
+    let didConfirmPayment = false;
 
     try {
       updatedOrder = await markZaloPayOrderPaid({
@@ -664,6 +675,8 @@ app.post("/payments/zalopay/query", async (req, res) => {
         transactionId: queryResult.transactionId,
         paidAt: queryResult.paidAt,
       });
+
+      didConfirmPayment = Boolean(updatedOrder);
     } catch (error) {
       if (
         error instanceof Error &&
@@ -673,6 +686,16 @@ app.post("/payments/zalopay/query", async (req, res) => {
       } else {
         throw error;
       }
+    }
+
+    if (!updatedOrder) {
+      return res.status(500).json({
+        message: "Không thể cập nhật trạng thái thanh toán ZaloPay.",
+      });
+    }
+
+    if (didConfirmPayment) {
+      await sendPaymentConfirmedEmail(updatedOrder);
     }
 
     return res.json({
@@ -937,6 +960,14 @@ app.patch("/admin/orders/:orderId/shipping", async (req, res) => {
       shippingCarrierName: carrierName,
       shippingTrackingCode: shippingTrackingCode.trim(),
     });
+
+    if (!updatedOrder) {
+      return res.status(500).json({
+        message: "Không thể lưu thông tin vận chuyển.",
+      });
+    }
+
+    await sendShippingUpdatedEmail(updatedOrder);
 
     return res.json({
       data: updatedOrder,

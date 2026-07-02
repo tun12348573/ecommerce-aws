@@ -85,6 +85,7 @@ Resources:
 
       Environment:
         Variables:
+          SES_FROM_EMAIL: thinhdaongoc1@gmail.com
           PRODUCTS_TABLE: !Ref ProductsTableName
           ORDERS_TABLE: !Ref OrdersTableName
           PRODUCT_IMAGES_BUCKET: !Ref FrontendBucket
@@ -121,6 +122,12 @@ Resources:
               - secretsmanager:GetSecretValue
 
             Resource: !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:ecommerce-aws/zalopay/sandbox-*"
+
+        - Statement:
+            Effect: Allow
+            Action:
+              - ses:SendEmail
+            Resource: !Sub "arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/thinhdaongoc1@gmail.com"
 
       Events:
         PublicApi:
