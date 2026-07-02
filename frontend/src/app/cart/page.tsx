@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useMemo, useSyncExternalStore } from "react";
 import type { CartItem } from "@/types/cart";
+import { CustomerAccountMenu } from "@/components/customer/CustomerAccountMenu";
 import {
   CART_UPDATED_EVENT,
   clearCart,
@@ -81,31 +82,41 @@ export default function CartPage() {
 
   return (
     <main className="min-h-screen bg-gray-50 text-gray-900">
-      <header className="border-b bg-white">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-          <Link href="/" className="text-2xl font-bold">
-            AWS Shop
-          </Link>
+    <header className="border-b bg-white">
+      <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
+        <Link href="/" className="text-2xl font-bold">
+          AWS Shop
+        </Link>
 
+        <div className="flex items-center gap-4">
           <nav className="hidden items-center gap-8 text-sm font-medium md:flex">
             <Link href="/" className="text-gray-600 hover:text-black">
               Trang chủ
             </Link>
 
-            <Link href="/products" className="text-gray-600 hover:text-black">
+            <Link href="/products/" className="text-gray-600 hover:text-black">
               Sản phẩm
             </Link>
 
-            <Link href="/cart" className="text-black">
-              Giỏ hàng
-            </Link>
-
-            <Link href="/login" className="text-gray-600 hover:text-black">
-              Đăng nhập
+            <Link
+              href="/track-order/"
+              className="text-gray-600 hover:text-black"
+            >
+              Tra cứu đơn
             </Link>
           </nav>
+
+          <CustomerAccountMenu />
+
+          <Link
+            href="/cart/"
+            className="rounded-full bg-black px-5 py-2 text-sm font-semibold text-white"
+          >
+            Giỏ hàng
+          </Link>
         </div>
-      </header>
+      </div>
+    </header>
 
       <section className="mx-auto max-w-7xl px-6 py-12">
         <div className="mb-8">

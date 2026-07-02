@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { type FormEvent, useState } from "react";
-
+import { CustomerAccountMenu } from "@/components/customer/CustomerAccountMenu";
 import { apiPost } from "@/lib/api";
 
 type OrderStatus =
@@ -231,19 +231,46 @@ export default function TrackOrderPage() {
   return (
     <main className="mx-auto min-h-screen max-w-4xl px-6 py-12">
       <header className="border-b border-slate-200 pb-7">
-        <p className="text-sm font-semibold text-slate-500">
-          ECOMMERCE AWS
-        </p>
+      <div className="flex items-center justify-between gap-4">
+        <Link href="/" className="text-2xl font-bold text-slate-900">
+          AWS Shop
+        </Link>
 
-        <h1 className="mt-2 text-3xl font-bold text-slate-900">
-          Tra cứu đơn hàng
-        </h1>
+        <div className="flex items-center gap-4">
+          <nav className="hidden items-center gap-6 text-sm font-medium md:flex">
+            <Link href="/products/" className="text-slate-600 hover:text-black">
+              Sản phẩm
+            </Link>
 
-        <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600">
-          Nhập mã đơn hàng và số điện thoại đã dùng khi đặt hàng để kiểm tra
-          trạng thái giao hàng.
-        </p>
-      </header>
+            <Link href="/track-order/" className="text-black">
+              Tra cứu đơn
+            </Link>
+          </nav>
+
+          <CustomerAccountMenu />
+
+          <Link
+            href="/cart/"
+            className="rounded-full bg-black px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
+          >
+            Giỏ hàng
+          </Link>
+        </div>
+      </div>
+
+      <p className="mt-8 text-sm font-semibold text-slate-500">
+        ECOMMERCE AWS
+      </p>
+
+      <h1 className="mt-2 text-3xl font-bold text-slate-900">
+        Tra cứu đơn hàng
+      </h1>
+
+      <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600">
+        Nhập mã đơn hàng và số điện thoại đã dùng khi đặt hàng để kiểm tra
+        trạng thái giao hàng.
+      </p>
+    </header>
 
       <section className="mt-8 grid gap-8 lg:grid-cols-[360px_1fr]">
         <form

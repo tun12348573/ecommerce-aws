@@ -1,6 +1,13 @@
 "use client";
 
 const SESSION_KEY = "ecommerce-customer-session";
+const CUSTOMER_SESSION_CHANGED_EVENT = "ecommerce-customer-session-changed";
+
+function notifyCustomerSessionChanged(): void {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(CUSTOMER_SESSION_CHANGED_EVENT));
+  }
+}
 
 type CognitoAuthenticationResult = {
   IdToken?: string;
@@ -79,7 +86,9 @@ async function callCognito(
     body: JSON.stringify(body),
   });
 
-  const data = (await response.json().catch(() => null)) as CognitoResponse | null;
+  const data = (await response.json().catch(() => null)) as
+    | CognitoResponse
+    | null;
 
   if (!response.ok) {
     throw new CustomerAuthError(
@@ -118,10 +127,16 @@ function saveCustomerSession(
 
   sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
 
+  notifyCustomerSessionChanged();
+
   return session;
 }
 
 function getStoredCustomerSession(): CustomerSession | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
   const rawSession = sessionStorage.getItem(SESSION_KEY);
 
   if (!rawSession) {
@@ -132,6 +147,8 @@ function getStoredCustomerSession(): CustomerSession | null {
     return JSON.parse(rawSession) as CustomerSession;
   } catch {
     sessionStorage.removeItem(SESSION_KEY);
+    notifyCustomerSessionChanged();
+
     return null;
   }
 }
@@ -287,5 +304,45 @@ export function getCustomerUsername(): string | null {
 }
 
 export function signOutCustomer(): void {
-  sessionStorage.removeItem(SESSION_KEY);
+  if (typeof window !== "undefined") {
+    sessionStorage.removeItem(SESSION_KEY);
+  }
+
+  notifyCustomerSessionChanged();
+}
+
+export function subscribeToCustomerSession(
+  listener: () => void
+): () => void {
+  if (typeof window === "undefined") {
+    return () => {};
+  }
+
+  const handleSessionChanged = () => {
+    listener();
+  };
+
+  window.addEventListener(
+    CUSTOMER_SESSION_CHANGED_EVENT,
+    handleSessionChanged
+  );
+
+  window.addEventListener("storage", handleSessionChanged);
+
+  return () => {
+    window.removeEventListener(
+      CUSTOMER_SESSION_CHANGED_EVENT,
+      handleSessionChanged
+    );
+
+    window.removeEventListener("storage", handleSessionChanged);
+  };
+}
+
+export function getCustomerSessionSnapshot(): string | null {
+  return getCustomerUsername();
+}
+
+export function getCustomerSessionServerSnapshot(): string | null {
+  return null;
 }

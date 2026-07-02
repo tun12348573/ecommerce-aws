@@ -9,6 +9,7 @@ import { customerPost } from "@/lib/customer-api";
 import { getCustomerUsername } from "@/lib/customer-auth";
 import { clearCart } from "@/lib/cart";
 import { useCartItems } from "@/hooks/useCartItems";
+import { CustomerAccountMenu } from "@/components/customer/CustomerAccountMenu";
 import type {
   CheckoutCustomer,
   CreateOrderRequest,
@@ -188,11 +189,12 @@ export default function CheckoutPage() {
   return (
     <main className="min-h-screen bg-gray-50 text-gray-900">
       <header className="border-b bg-white">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-          <Link href="/" className="text-2xl font-bold">
-            AWS Shop
-          </Link>
+      <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
+        <Link href="/" className="text-2xl font-bold">
+          AWS Shop
+        </Link>
 
+        <div className="flex items-center gap-4">
           <nav className="hidden items-center gap-8 text-sm font-medium md:flex">
             <Link href="/" className="text-gray-600 hover:text-black">
               Trang chủ
@@ -202,19 +204,25 @@ export default function CheckoutPage() {
               Sản phẩm
             </Link>
 
-            <Link href="/cart/" className="text-gray-600 hover:text-black">
-              Giỏ hàng
-            </Link>
-
             <Link
-              href={customerAccountEmail ? "/account/orders/" : "/account/login/"}
+              href="/track-order/"
               className="text-gray-600 hover:text-black"
             >
-              {customerAccountEmail ? "Đơn hàng của tôi" : "Đăng nhập"}
+             Tra cứu đơn
             </Link>
           </nav>
+
+          <CustomerAccountMenu />
+
+          <Link
+            href="/cart/"
+            className="rounded-full bg-black px-5 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
+          >
+            Giỏ hàng
+          </Link>
         </div>
-      </header>
+      </div>
+    </header>
 
       <section className="mx-auto max-w-7xl px-6 py-12">
         <div className="mb-8">

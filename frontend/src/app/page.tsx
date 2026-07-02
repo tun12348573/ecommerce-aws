@@ -2,6 +2,7 @@ import Link from "next/link";
 import { apiGet } from "@/lib/api";
 import type { Product } from "@/types/product";
 import { ProductCard } from "@/components/products/ProductCard";
+import { CustomerAccountMenu } from "@/components/customer/CustomerAccountMenu";
 
 type ProductsResponse = {
   data: Product[];
@@ -19,32 +20,35 @@ export default async function HomePage() {
             AWS Shop
           </Link>
 
+        <div className="flex items-center gap-4">
           <nav className="hidden items-center gap-8 text-sm font-medium md:flex">
             <Link href="/" className="text-black">
               Trang chủ
             </Link>
 
-            <Link href="/products" className="text-gray-600 hover:text-black">
+            <Link href="/products/" className="text-gray-600 hover:text-black">
               Sản phẩm
             </Link>
 
-            <Link href="/cart" className="text-gray-600 hover:text-black">
-              Giỏ hàng
-            </Link>
-
-            <Link href="/login" className="text-gray-600 hover:text-black">
-              Đăng nhập
+            <Link
+              href="/track-order/"
+              className="text-gray-600 hover:text-black"
+            >
+              Tra cứu đơn
             </Link>
           </nav>
 
+          <CustomerAccountMenu />
+
           <Link
-            href="/cart"
-            className="rounded-full bg-black px-5 py-2 text-sm font-semibold text-white"
+            href="/cart/"
+            className="rounded-full bg-black px-5 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
           >
             Giỏ hàng
           </Link>
         </div>
-      </header>
+      </div>
+    </header>
 
       <section className="bg-white">
         <div className="mx-auto grid max-w-7xl gap-10 px-6 py-20 md:grid-cols-2 md:items-center">
