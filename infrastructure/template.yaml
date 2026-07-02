@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: Ecommerce AWS backend with Cognito JWT admin authentication
+Description: Ecommerce AWS backend with separate Cognito pools for admin and customers
 
 Parameters:
   ProductsTableName:
@@ -55,6 +55,105 @@ Resources:
 
       PreventUserExistenceErrors: ENABLED
 
+  # Giữ pool cũ nguyên cấu hình để CloudFormation không cố đổi AliasAttributes.
+  # Pool này không dùng cho đăng ký mới.
+  CustomerUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: ecommerce-aws-customer-users
+
+      AliasAttributes:
+        - email
+
+      AutoVerifiedAttributes:
+        - email
+
+      UsernameConfiguration:
+        CaseSensitive: false
+
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: false
+
+      MfaConfiguration: "OFF"
+
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Required: true
+          Mutable: true
+
+  CustomerUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: ecommerce-aws-customer-web
+      UserPoolId: !Ref CustomerUserPool
+
+      GenerateSecret: false
+
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+
+      PreventUserExistenceErrors: ENABLED
+
+  # Pool mới dùng UsernameAttributes=email để frontend có thể dùng email làm Username khi SignUp.
+  CustomerUserPoolV2:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: ecommerce-aws-customer-users-v2
+
+      UsernameAttributes:
+        - email
+
+      AutoVerifiedAttributes:
+        - email
+
+      UsernameConfiguration:
+        CaseSensitive: false
+
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: false
+
+      MfaConfiguration: "OFF"
+
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Required: true
+          Mutable: true
+
+  CustomerUserPoolClientV2:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: ecommerce-aws-customer-web-v2
+      UserPoolId: !Ref CustomerUserPoolV2
+
+      GenerateSecret: false
+
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+
+      PreventUserExistenceErrors: ENABLED
+
   EcommerceHttpApi:
     Type: AWS::Serverless::HttpApi
     Properties:
@@ -69,6 +168,14 @@ Resources:
               issuer: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${AdminUserPool}"
               audience:
                 - !Ref AdminUserPoolClient
+
+          CustomerJwtAuthorizer:
+            IdentitySource: "$request.header.Authorization"
+
+            JwtConfiguration:
+              issuer: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${CustomerUserPoolV2}"
+              audience:
+                - !Ref CustomerUserPoolClientV2
 
   EcommerceBackendFunction:
     Type: AWS::Serverless::Function
@@ -109,6 +216,7 @@ Resources:
               - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ProductsTableName}"
               - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ProductsTableName}/index/*"
               - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${OrdersTableName}"
+
         - Statement:
             Effect: Allow
             Action:
@@ -117,10 +225,8 @@ Resources:
 
         - Statement:
             Effect: Allow
-
             Action:
               - secretsmanager:GetSecretValue
-
             Resource: !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:ecommerce-aws/zalopay/sandbox-*"
 
         - Statement:
@@ -151,6 +257,22 @@ Resources:
           Properties:
             ApiId: !Ref EcommerceHttpApi
             Path: "/admin/{proxy+}"
+            Method: OPTIONS
+
+        CustomerApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EcommerceHttpApi
+            Path: "/account/{proxy+}"
+            Method: ANY
+            Auth:
+              Authorizer: CustomerJwtAuthorizer
+
+        CustomerCorsPreflight:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EcommerceHttpApi
+            Path: "/account/{proxy+}"
             Method: OPTIONS
 
     Metadata:
@@ -193,6 +315,7 @@ Resources:
             ExposedHeaders:
               - ETag
             MaxAge: 3000
+
   FrontendOriginAccessControl:
     Type: AWS::CloudFront::OriginAccessControl
     Properties:
@@ -311,6 +434,18 @@ Outputs:
   AdminUserPoolIssuer:
     Description: Cognito JWT issuer URL
     Value: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${AdminUserPool}"
+
+  CustomerUserPoolId:
+    Description: Cognito customer user pool ID
+    Value: !Ref CustomerUserPoolV2
+
+  CustomerUserPoolClientId:
+    Description: Cognito customer app client ID
+    Value: !Ref CustomerUserPoolClientV2
+
+  CustomerUserPoolIssuer:
+    Description: Cognito customer JWT issuer URL
+    Value: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${CustomerUserPoolV2}"
 
   FrontendBucketName:
     Description: Private S3 bucket storing the static frontend files
