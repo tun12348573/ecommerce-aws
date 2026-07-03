@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 import { CustomerAccountMenu } from "@/components/customer/CustomerAccountMenu";
 import { CustomerAuthError } from "@/lib/customer-auth";
-import { customerGet } from "@/lib/customer-api";
+import { customerGet, customerPatch } from "@/lib/customer-api";
 import type {
   Order,
   OrderStatus,
@@ -99,7 +99,9 @@ function CustomerOrderDetailContent() {
 
   const [order, setOrder] = useState<Order | null>(null);
   const [isLoading, setIsLoading] = useState(Boolean(orderId));
+  const [isCancelling, setIsCancelling] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
 
   useEffect(() => {
   if (!orderId) {
@@ -151,6 +153,61 @@ function CustomerOrderDetailContent() {
       window.clearTimeout(timerId);
     };
   }, [orderId, router]);
+
+
+  async function handleCancelOrder() {
+    if (!order || order.orderStatus !== "PROCESSING") {
+      return;
+    }
+
+    const paymentWarning =
+      order.paymentStatus === "PAID"
+        ? "\n\nKhoản thanh toán đã được ghi nhận. Shop sẽ kiểm tra và xử lý hoàn tiền theo chính sách hiện hành."
+        : "";
+
+    const confirmed = window.confirm(
+      `Bạn có chắc muốn hủy đơn hàng ${order.orderId}? Tồn kho sẽ được hoàn lại.${paymentWarning}`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setIsCancelling(true);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    try {
+      const response = await customerPatch<
+        OrderResponse,
+        Record<string, never>
+      >(`/account/orders/${encodeURIComponent(order.orderId)}/cancel`, {});
+
+      setOrder(response.data);
+      setSuccessMessage(
+        response.data.paymentStatus === "PAID"
+          ? "Đơn hàng đã được hủy. Shop sẽ kiểm tra và xử lý hoàn tiền theo chính sách hiện hành."
+          : "Đơn hàng đã được hủy thành công."
+      );
+    } catch (error) {
+      if (error instanceof CustomerAuthError) {
+        router.replace(
+          `/account/login/?returnTo=${encodeURIComponent(
+            `/account/order-detail/?orderId=${order.orderId}`
+          )}`
+        );
+        return;
+      }
+
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Không thể hủy đơn hàng."
+      );
+    } finally {
+      setIsCancelling(false);
+    }
+  }
 
   const itemSubtotal = useMemo(() => {
     if (!order) {
@@ -284,6 +341,12 @@ function CustomerOrderDetailContent() {
           </p>
         ) : null}
 
+        {successMessage ? (
+          <p className="mt-5 rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+            {successMessage}
+          </p>
+        ) : null}
+
         {!isLoading && !errorMessage && !order ? (
           <p className="py-20 text-center text-sm text-slate-500">
             Không tìm thấy đơn hàng.
@@ -348,6 +411,35 @@ function CustomerOrderDetailContent() {
                   </div>
                 </div>
               </section>
+
+              {order.orderStatus === "PROCESSING" ? (
+                <section className="rounded-2xl border border-amber-200 bg-amber-50 p-6 shadow-sm">
+                  <h2 className="text-xl font-bold text-amber-950">
+                    Hủy đơn hàng
+                  </h2>
+
+                  <p className="mt-2 text-sm leading-6 text-amber-900">
+                    Bạn có thể hủy đơn khi shop chưa bắt đầu giao hàng. Sản phẩm
+                    sẽ được hoàn lại tồn kho.
+                  </p>
+
+                  {order.paymentStatus === "PAID" ? (
+                    <p className="mt-3 text-sm leading-6 text-amber-900">
+                      Khoản thanh toán đã được ghi nhận. Shop sẽ kiểm tra và xử
+                      lý hoàn tiền theo chính sách hiện hành.
+                    </p>
+                  ) : null}
+
+                  <button
+                    type="button"
+                    onClick={() => void handleCancelOrder()}
+                    disabled={isCancelling}
+                    className="mt-5 rounded-lg bg-red-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isCancelling ? "Đang hủy đơn..." : "Hủy đơn hàng"}
+                  </button>
+                </section>
+              ) : null}
 
               <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                 <h2 className="text-xl font-bold text-slate-900">

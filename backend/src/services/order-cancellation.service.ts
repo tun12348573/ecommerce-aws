@@ -12,6 +12,8 @@ const documentClient = DynamoDBDocumentClient.from(
   })
 );
 
+type CancellableOrderStatus = "PROCESSING" | "SHIPPING";
+
 export class OrderCancellationError extends Error {
   constructor(message: string) {
     super(message);
@@ -60,7 +62,49 @@ function getProductQuantities(order: Order): Map<string, number> {
   return quantities;
 }
 
-export async function cancelOrderAndRestock(order: Order): Promise<void> {
+function buildAllowedStatusCondition(
+  allowedStatuses: CancellableOrderStatus[]
+): {
+  condition: string;
+  values: Record<string, CancellableOrderStatus>;
+} {
+  const uniqueStatuses = [...new Set(allowedStatuses)];
+
+  if (uniqueStatuses.length === 0) {
+    throw new OrderCancellationError(
+      "Phải có ít nhất một trạng thái được phép hủy."
+    );
+  }
+
+  const values = Object.fromEntries(
+    uniqueStatuses.map((status, index) => [
+      `:allowedStatus${index}`,
+      status,
+    ])
+  ) as Record<string, CancellableOrderStatus>;
+
+  if (uniqueStatuses.length === 1) {
+    return {
+      condition: "#orderStatus = :allowedStatus0",
+      values,
+    };
+  }
+
+  return {
+    condition: `#orderStatus IN (${uniqueStatuses
+      .map((_, index) => `:allowedStatus${index}`)
+      .join(", ")})`,
+    values,
+  };
+}
+
+export async function cancelOrderAndRestock(
+  order: Order,
+  allowedStatuses: CancellableOrderStatus[] = [
+    "PROCESSING",
+    "SHIPPING",
+  ]
+): Promise<void> {
   if (!order.orderId?.trim()) {
     throw new OrderCancellationError("Mã đơn hàng không hợp lệ.");
   }
@@ -75,6 +119,9 @@ export async function cancelOrderAndRestock(order: Order): Promise<void> {
       "Đơn hàng có quá nhiều sản phẩm để xử lý trong một giao dịch."
     );
   }
+
+  const { condition: allowedStatusCondition, values: statusValues } =
+    buildAllowedStatusCondition(allowedStatuses);
 
   const updatedAt = new Date().toISOString();
 
@@ -94,8 +141,7 @@ export async function cancelOrderAndRestock(order: Order): Promise<void> {
             },
             UpdateExpression:
               "SET #orderStatus = :cancelled, #updatedAt = :updatedAt, #statusHistory = list_append(if_not_exists(#statusHistory, :emptyHistory), :newStatusHistory)",
-            ConditionExpression:
-              "attribute_exists(orderId) AND #orderStatus IN (:processing, :shipping)",
+            ConditionExpression: `attribute_exists(orderId) AND ${allowedStatusCondition}`,
             ExpressionAttributeNames: {
               "#orderStatus": "orderStatus",
               "#updatedAt": "updatedAt",
@@ -103,11 +149,10 @@ export async function cancelOrderAndRestock(order: Order): Promise<void> {
             },
             ExpressionAttributeValues: {
               ":cancelled": "CANCELLED",
-              ":processing": "PROCESSING",
-              ":shipping": "SHIPPING",
               ":updatedAt": updatedAt,
               ":emptyHistory": [],
               ":newStatusHistory": [historyItem],
+              ...statusValues,
             },
           },
         },
@@ -133,4 +178,3 @@ export async function cancelOrderAndRestock(order: Order): Promise<void> {
     })
   );
 }
-

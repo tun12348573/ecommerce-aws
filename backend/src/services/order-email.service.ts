@@ -12,7 +12,8 @@ const sesClient = new SESv2Client({
 type EmailEventType =
   | "order_created"
   | "payment_confirmed"
-  | "shipping_updated";
+  | "shipping_updated"
+  | "order_cancelled";
 
 type SendOrderEmailInput = {
   to: string;
@@ -438,3 +439,71 @@ export async function sendShippingUpdatedEmail(
     orderId: order.orderId,
   });
 }
+
+export async function sendOrderCancelledEmail(
+  order: Order
+): Promise<void> {
+  const paymentNotice =
+    order.paymentStatus === "PAID"
+      ? "Khoản thanh toán đã được ghi nhận. Shop sẽ kiểm tra và xử lý hoàn tiền theo chính sách hiện hành."
+      : "Đơn hàng chưa thanh toán nên không có khoản tiền cần hoàn lại.";
+
+  const subject = `AWS Shop | Đơn hàng đã hủy ${order.orderId}`;
+
+  const text = [
+    `Xin chào ${order.customer.fullName},`,
+    "",
+    "Đơn hàng của bạn đã được hủy theo yêu cầu.",
+    `Mã đơn hàng: ${order.orderId}`,
+    `Tổng tiền: ${formatMoney(order.total)}`,
+    `Phương thức thanh toán: ${getPaymentMethodLabel(order)}`,
+    `Trạng thái thanh toán: ${
+      order.paymentStatus === "PAID"
+        ? "Đã thanh toán"
+        : "Chưa thanh toán"
+    }`,
+    "",
+    paymentNotice,
+  ].join("\n");
+
+  const html = createEmailHtml({
+    title: "Đơn hàng đã hủy",
+    greeting: `Xin chào ${order.customer.fullName},`,
+    description: `Đơn hàng của bạn đã được hủy theo yêu cầu. ${paymentNotice}`,
+    details: [
+      {
+        label: "Mã đơn hàng",
+        value: order.orderId,
+      },
+      {
+        label: "Tổng tiền",
+        value: formatMoney(order.total),
+      },
+      {
+        label: "Phương thức thanh toán",
+        value: getPaymentMethodLabel(order),
+      },
+      {
+        label: "Trạng thái thanh toán",
+        value:
+          order.paymentStatus === "PAID"
+            ? "Đã thanh toán"
+            : "Chưa thanh toán",
+      },
+      {
+        label: "Thời gian hủy",
+        value: formatDate(order.updatedAt),
+      },
+    ],
+  });
+
+  await sendOrderEmail({
+    to: order.customer.email,
+    subject,
+    text,
+    html,
+    eventType: "order_cancelled",
+    orderId: order.orderId,
+  });
+}
+

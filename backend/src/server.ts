@@ -11,6 +11,7 @@ import {
 } from "./services/product-image-upload.service";
 
 import {
+  sendOrderCancelledEmail,
   sendOrderCreatedEmail,
   sendPaymentConfirmedEmail,
   sendShippingUpdatedEmail,
@@ -563,6 +564,87 @@ app.get("/account/orders/:orderId", async (req, res) => {
     });
   }
 });
+
+app.patch("/account/orders/:orderId/cancel", async (req, res) => {
+  const authenticatedCustomer = getAuthenticatedCustomer(req);
+
+  if (!authenticatedCustomer) {
+    return res.status(401).json({
+      message: "Không thể xác thực tài khoản khách hàng.",
+    });
+  }
+
+  try {
+    const orderId = req.params.orderId.trim();
+
+    if (!orderId) {
+      return res.status(400).json({
+        message: "Mã đơn hàng không hợp lệ.",
+      });
+    }
+
+    const existingOrder = await getOrderById(orderId);
+
+    if (
+      !existingOrder ||
+      existingOrder.customerUserId !== authenticatedCustomer.userId
+    ) {
+      return res.status(404).json({
+        message: "Không tìm thấy đơn hàng của tài khoản này.",
+      });
+    }
+
+    if (existingOrder.orderStatus !== "PROCESSING") {
+      return res.status(409).json({
+        message:
+          "Bạn chỉ có thể hủy đơn khi shop chưa bắt đầu giao hàng.",
+      });
+    }
+
+    try {
+      await cancelOrderAndRestock(existingOrder, ["PROCESSING"]);
+    } catch (error) {
+      if (error instanceof OrderCancellationError) {
+        return res.status(400).json({
+          message: error.message,
+        });
+      }
+
+      if (
+        error instanceof Error &&
+        error.name === "TransactionCanceledException"
+      ) {
+        return res.status(409).json({
+          message:
+            "Đơn hàng hoặc tồn kho vừa được cập nhật. Hãy tải lại trang và thử lại.",
+        });
+      }
+
+      throw error;
+    }
+
+    const cancelledOrder = await getOrderById(existingOrder.orderId);
+
+    if (!cancelledOrder) {
+      return res.status(500).json({
+        message: "Không thể lấy đơn hàng sau khi hủy.",
+      });
+    }
+
+    await sendOrderCancelledEmail(cancelledOrder);
+
+    return res.json({
+      data: cancelledOrder,
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Không thể hủy đơn hàng.",
+    });
+  }
+});
+
 // =========================
 // ZaloPay Sandbox Payment APIs
 // =========================
