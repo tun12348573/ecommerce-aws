@@ -4,6 +4,12 @@ export type PaymentMethod = "COD" | "BANK_TRANSFER" | "ZALOPAY";
 
 export type PaymentStatus = "PENDING" | "PAID";
 
+export type RefundStatus =
+  | "REQUESTING"
+  | "PENDING"
+  | "REFUNDED"
+  | "FAILED";
+
 export type OrderStatus =
   | "PROCESSING"
   | "SHIPPING"
@@ -60,6 +66,16 @@ export type Order = {
   zalopayOrderUrl?: string;
   zalopayPaymentExpiresAt?: string;
 
+  refundStatus?: RefundStatus;
+  refundAmount?: number;
+  refundReason?: string;
+  refundMerchantId?: string;
+  refundZaloPayId?: string;
+  refundRequestedAt?: string;
+  refundCompletedAt?: string;
+  refundLastCheckedAt?: string;
+  refundLastMessage?: string;
+
   orderStatus: OrderStatus;
   shippingCarrier?: ShippingCarrier;
   shippingCarrierName?: string;
@@ -80,4 +96,3 @@ export type CreateOrderRequest = {
 export type OrderResponse = {
   data: Order;
 };
-

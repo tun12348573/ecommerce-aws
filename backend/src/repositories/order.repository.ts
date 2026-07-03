@@ -15,6 +15,7 @@ import type {
   Order,
   OrderStatus,
   OrderStatusHistoryItem,
+  RefundStatus,
   ShippingCarrier,
 } from "../types/order";
 
@@ -38,6 +39,35 @@ type UpdateOrderShippingInput = {
   shippingCarrier: ShippingCarrier;
   shippingCarrierName?: string;
   shippingTrackingCode: string;
+};
+
+
+type BeginZaloPayRefundInput = {
+  orderId: string;
+  merchantRefundId: string;
+  amount: number;
+  reason: string;
+};
+
+type MarkZaloPayRefundPendingInput = {
+  orderId: string;
+  merchantRefundId: string;
+  providerRefundId?: string;
+  providerMessage: string;
+};
+
+type MarkZaloPayRefundFailedInput = {
+  orderId: string;
+  merchantRefundId: string;
+  message: string;
+};
+
+type SyncZaloPayRefundStatusInput = {
+  orderId: string;
+  merchantRefundId: string;
+  status: Extract<RefundStatus, "PENDING" | "REFUNDED" | "FAILED">;
+  providerRefundId?: string;
+  providerMessage: string;
 };
 
 export async function listOrders(): Promise<Order[]> {
@@ -339,6 +369,194 @@ export async function updateOrderShipping(
         orderId: input.orderId,
       },
       UpdateExpression: `SET ${setParts.join(", ")}`,
+      ExpressionAttributeNames: expressionAttributeNames,
+      ExpressionAttributeValues: expressionAttributeValues,
+      ReturnValues: "ALL_NEW",
+    })
+  );
+
+  return (result.Attributes as Order | undefined) ?? null;
+}
+
+/**
+ * Creates a durable refund lock before the external ZaloPay API is called.
+ * This prevents two admin clicks from creating two refund requests.
+ */
+export async function beginZaloPayRefund(
+  input: BeginZaloPayRefundInput
+): Promise<Order | null> {
+  const now = new Date().toISOString();
+
+  const result = await docClient.send(
+    new UpdateCommand({
+      TableName: getOrdersTableName(),
+      Key: {
+        orderId: input.orderId,
+      },
+      UpdateExpression:
+        "SET #refundStatus = :requesting, #refundAmount = :amount, #refundReason = :reason, #refundMerchantId = :merchantRefundId, #refundRequestedAt = :requestedAt, #refundLastCheckedAt = :requestedAt, #refundLastMessage = :message, #updatedAt = :updatedAt REMOVE #refundZaloPayId, #refundCompletedAt",
+      ConditionExpression:
+        "attribute_exists(orderId) AND #paymentMethod = :paymentMethod AND #paymentStatus = :paymentStatus AND #orderStatus = :orderStatus AND (attribute_not_exists(#refundStatus) OR #refundStatus = :failed)",
+      ExpressionAttributeNames: {
+        "#paymentMethod": "paymentMethod",
+        "#paymentStatus": "paymentStatus",
+        "#orderStatus": "orderStatus",
+        "#refundStatus": "refundStatus",
+        "#refundAmount": "refundAmount",
+        "#refundReason": "refundReason",
+        "#refundMerchantId": "refundMerchantId",
+        "#refundRequestedAt": "refundRequestedAt",
+        "#refundLastCheckedAt": "refundLastCheckedAt",
+        "#refundLastMessage": "refundLastMessage",
+        "#refundZaloPayId": "refundZaloPayId",
+        "#refundCompletedAt": "refundCompletedAt",
+        "#updatedAt": "updatedAt",
+      },
+      ExpressionAttributeValues: {
+        ":paymentMethod": "ZALOPAY",
+        ":paymentStatus": "PAID",
+        ":orderStatus": "CANCELLED",
+        ":requesting": "REQUESTING",
+        ":failed": "FAILED",
+        ":amount": input.amount,
+        ":reason": input.reason,
+        ":merchantRefundId": input.merchantRefundId,
+        ":requestedAt": now,
+        ":message": "Đang khởi tạo yêu cầu hoàn tiền với ZaloPay.",
+        ":updatedAt": now,
+      },
+      ReturnValues: "ALL_NEW",
+    })
+  );
+
+  return (result.Attributes as Order | undefined) ?? null;
+}
+
+export async function markZaloPayRefundPending(
+  input: MarkZaloPayRefundPendingInput
+): Promise<Order | null> {
+  const now = new Date().toISOString();
+
+  const result = await docClient.send(
+    new UpdateCommand({
+      TableName: getOrdersTableName(),
+      Key: {
+        orderId: input.orderId,
+      },
+      UpdateExpression:
+        "SET #refundStatus = :pending, #refundLastCheckedAt = :checkedAt, #refundLastMessage = :message, #refundZaloPayId = :providerRefundId, #updatedAt = :updatedAt",
+      ConditionExpression:
+        "attribute_exists(orderId) AND #refundMerchantId = :merchantRefundId AND #refundStatus = :requesting",
+      ExpressionAttributeNames: {
+        "#refundStatus": "refundStatus",
+        "#refundMerchantId": "refundMerchantId",
+        "#refundLastCheckedAt": "refundLastCheckedAt",
+        "#refundLastMessage": "refundLastMessage",
+        "#refundZaloPayId": "refundZaloPayId",
+        "#updatedAt": "updatedAt",
+      },
+      ExpressionAttributeValues: {
+        ":pending": "PENDING",
+        ":requesting": "REQUESTING",
+        ":merchantRefundId": input.merchantRefundId,
+        ":checkedAt": now,
+        ":message": input.providerMessage,
+        ":providerRefundId": input.providerRefundId ?? "",
+        ":updatedAt": now,
+      },
+      ReturnValues: "ALL_NEW",
+    })
+  );
+
+  return (result.Attributes as Order | undefined) ?? null;
+}
+
+export async function markZaloPayRefundFailed(
+  input: MarkZaloPayRefundFailedInput
+): Promise<Order | null> {
+  const now = new Date().toISOString();
+
+  const result = await docClient.send(
+    new UpdateCommand({
+      TableName: getOrdersTableName(),
+      Key: {
+        orderId: input.orderId,
+      },
+      UpdateExpression:
+        "SET #refundStatus = :failed, #refundLastCheckedAt = :checkedAt, #refundLastMessage = :message, #updatedAt = :updatedAt",
+      ConditionExpression:
+        "attribute_exists(orderId) AND #refundMerchantId = :merchantRefundId AND #refundStatus = :requesting",
+      ExpressionAttributeNames: {
+        "#refundStatus": "refundStatus",
+        "#refundMerchantId": "refundMerchantId",
+        "#refundLastCheckedAt": "refundLastCheckedAt",
+        "#refundLastMessage": "refundLastMessage",
+        "#updatedAt": "updatedAt",
+      },
+      ExpressionAttributeValues: {
+        ":failed": "FAILED",
+        ":requesting": "REQUESTING",
+        ":merchantRefundId": input.merchantRefundId,
+        ":checkedAt": now,
+        ":message": input.message,
+        ":updatedAt": now,
+      },
+      ReturnValues: "ALL_NEW",
+    })
+  );
+
+  return (result.Attributes as Order | undefined) ?? null;
+}
+
+export async function syncZaloPayRefundStatus(
+  input: SyncZaloPayRefundStatusInput
+): Promise<Order | null> {
+  const now = new Date().toISOString();
+
+  const updateParts = [
+    "#refundStatus = :refundStatus",
+    "#refundLastCheckedAt = :checkedAt",
+    "#refundLastMessage = :message",
+    "#refundZaloPayId = :providerRefundId",
+    "#updatedAt = :updatedAt",
+  ];
+
+  const expressionAttributeNames: Record<string, string> = {
+    "#refundStatus": "refundStatus",
+    "#refundMerchantId": "refundMerchantId",
+    "#refundLastCheckedAt": "refundLastCheckedAt",
+    "#refundLastMessage": "refundLastMessage",
+    "#refundZaloPayId": "refundZaloPayId",
+    "#updatedAt": "updatedAt",
+  };
+
+  const expressionAttributeValues: Record<string, unknown> = {
+    ":refundStatus": input.status,
+    ":merchantRefundId": input.merchantRefundId,
+    ":checkedAt": now,
+    ":message": input.providerMessage,
+    ":providerRefundId": input.providerRefundId ?? "",
+    ":updatedAt": now,
+    ":requesting": "REQUESTING",
+    ":pending": "PENDING",
+    ":failed": "FAILED",
+  };
+
+  if (input.status === "REFUNDED") {
+    updateParts.push("#refundCompletedAt = :completedAt");
+    expressionAttributeNames["#refundCompletedAt"] = "refundCompletedAt";
+    expressionAttributeValues[":completedAt"] = now;
+  }
+
+  const result = await docClient.send(
+    new UpdateCommand({
+      TableName: getOrdersTableName(),
+      Key: {
+        orderId: input.orderId,
+      },
+      UpdateExpression: `SET ${updateParts.join(", ")}`,
+      ConditionExpression:
+        "attribute_exists(orderId) AND #refundMerchantId = :merchantRefundId AND #refundStatus IN (:requesting, :pending, :failed)",
       ExpressionAttributeNames: expressionAttributeNames,
       ExpressionAttributeValues: expressionAttributeValues,
       ReturnValues: "ALL_NEW",

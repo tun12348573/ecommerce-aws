@@ -12,6 +12,7 @@ import {
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { AdminGuard } from "@/components/admin/AdminGuard";
+import { AdminZaloPayRefundPanel } from "@/components/admin/AdminZaloPayRefundPanel";
 import { AdminAuthError } from "@/lib/admin-auth";
 import { adminGet, adminPatch } from "@/lib/admin-api";
 import type {
@@ -691,6 +692,11 @@ function AdminOrderDetailContent() {
                 ) : null}
               </div>
             </section>
+
+            <AdminZaloPayRefundPanel
+              order={order}
+              onOrderUpdated={setOrder}
+            />
           </aside>
         </div>
       ) : null}

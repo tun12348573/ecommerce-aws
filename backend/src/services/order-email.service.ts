@@ -13,7 +13,8 @@ type EmailEventType =
   | "order_created"
   | "payment_confirmed"
   | "shipping_updated"
-  | "order_cancelled";
+  | "order_cancelled"
+  | "refund_completed";
 
 type SendOrderEmailInput = {
   to: string;
@@ -507,3 +508,59 @@ export async function sendOrderCancelledEmail(
   });
 }
 
+export async function sendRefundCompletedEmail(
+  order: Order
+): Promise<void> {
+  const refundAmount = order.refundAmount ?? order.total;
+
+  const subject = `AWS Shop | Hoàn tiền thành công ${order.orderId}`;
+
+  const text = [
+    `Xin chào ${order.customer.fullName},`,
+    "",
+    "AWS Shop đã xác nhận khoản hoàn tiền của bạn được ZaloPay xử lý thành công.",
+    `Mã đơn hàng: ${order.orderId}`,
+    `Số tiền hoàn: ${formatMoney(refundAmount)}`,
+    `Thời gian hoàn tiền: ${formatDate(order.refundCompletedAt)}`,
+    `Mã hoàn tiền ZaloPay: ${order.refundZaloPayId ?? "Chưa có"}`,
+    `Lý do: ${order.refundReason ?? "Hủy đơn hàng"}`,
+  ].join("\n");
+
+  const html = createEmailHtml({
+    title: "Hoàn tiền thành công",
+    greeting: `Xin chào ${order.customer.fullName},`,
+    description:
+      "ZaloPay đã xác nhận khoản hoàn tiền cho đơn hàng của bạn. Thời gian tiền về ví hoặc nguồn thanh toán có thể phụ thuộc vào quy trình của ZaloPay.",
+    details: [
+      {
+        label: "Mã đơn hàng",
+        value: order.orderId,
+      },
+      {
+        label: "Số tiền hoàn",
+        value: formatMoney(refundAmount),
+      },
+      {
+        label: "Thời gian hoàn tiền",
+        value: formatDate(order.refundCompletedAt),
+      },
+      {
+        label: "Mã hoàn tiền ZaloPay",
+        value: order.refundZaloPayId ?? "Chưa có",
+      },
+      {
+        label: "Lý do",
+        value: order.refundReason ?? "Hủy đơn hàng",
+      },
+    ],
+  });
+
+  await sendOrderEmail({
+    to: order.customer.email,
+    subject,
+    text,
+    html,
+    eventType: "refund_completed",
+    orderId: order.orderId,
+  });
+}

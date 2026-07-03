@@ -14,6 +14,7 @@ import {
   sendOrderCancelledEmail,
   sendOrderCreatedEmail,
   sendPaymentConfirmedEmail,
+  sendRefundCompletedEmail,
   sendShippingUpdatedEmail,
 } from "./services/order-email.service";
 
@@ -27,12 +28,16 @@ import {
 } from "./repositories/product.repository";
 
 import {
+  beginZaloPayRefund,
   createOrderAndDecrementStock,
   getOrderById,
   listOrders,
   listOrdersByCustomerUserId,
+  markZaloPayRefundFailed,
+  markZaloPayRefundPending,
   markZaloPayOrderPaid,
   saveZaloPayPaymentSession,
+  syncZaloPayRefundStatus,
   updateOrderStatus,
   updateOrderShipping,
 } from "./repositories/order.repository";
@@ -49,6 +54,13 @@ import {
   verifyZaloPayCallback,
   ZaloPayPaymentError,
 } from "./services/zalopay-payment.service";
+
+import {
+  createZaloPayMerchantRefundId,
+  createZaloPayRefund,
+  queryZaloPayRefund,
+  ZaloPayRefundError,
+} from "./services/zalopay-refund.service";
 
 import type { ProductInput } from "./types/product";
 import type {
@@ -1135,6 +1147,243 @@ app.get("/admin/orders", async (req, res) => {
 
     return res.status(500).json({
       message: "Cannot get admin orders",
+    });
+  }
+});
+
+
+function isConditionalCheckFailure(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.name === "ConditionalCheckFailedException" ||
+      error.name === "TransactionCanceledException")
+  );
+}
+
+app.patch("/admin/orders/:orderId/refund", async (req, res) => {
+  try {
+    const orderId = req.params.orderId.trim();
+
+    const { reason } = req.body as {
+      reason?: unknown;
+    };
+
+    if (!orderId) {
+      return res.status(400).json({
+        message: "Mã đơn hàng không hợp lệ.",
+      });
+    }
+
+    const refundReason =
+      typeof reason === "string" && reason.trim()
+        ? reason.trim()
+        : `Hoan tien don hang ${orderId}`;
+
+    if (refundReason.length > 256) {
+      return res.status(400).json({
+        message: "Lý do hoàn tiền không được vượt quá 256 ký tự.",
+      });
+    }
+
+    const existingOrder = await getOrderById(orderId);
+
+    if (!existingOrder) {
+      return res.status(404).json({
+        message: "Không tìm thấy đơn hàng.",
+      });
+    }
+
+    if (
+      existingOrder.paymentMethod !== "ZALOPAY" ||
+      existingOrder.paymentStatus !== "PAID"
+    ) {
+      return res.status(409).json({
+        message: "Chỉ đơn ZaloPay đã thanh toán mới có thể hoàn tiền.",
+      });
+    }
+
+    if (existingOrder.orderStatus !== "CANCELLED") {
+      return res.status(409).json({
+        message: "Chỉ hoàn tiền sau khi đơn hàng đã được hủy.",
+      });
+    }
+
+    if (!existingOrder.paymentTransactionId) {
+      return res.status(409).json({
+        message: "Đơn hàng không có mã giao dịch ZaloPay.",
+      });
+    }
+
+    if (
+      existingOrder.refundStatus === "REQUESTING" ||
+      existingOrder.refundStatus === "PENDING" ||
+      existingOrder.refundStatus === "REFUNDED"
+    ) {
+      return res.status(409).json({
+        message: "Đơn hàng đã có yêu cầu hoàn tiền đang xử lý hoặc đã hoàn tất.",
+      });
+    }
+
+    const merchantRefundId = await createZaloPayMerchantRefundId();
+
+    let lockedOrder: Order | null;
+
+    try {
+      lockedOrder = await beginZaloPayRefund({
+        orderId: existingOrder.orderId,
+        merchantRefundId,
+        amount: existingOrder.total,
+        reason: refundReason,
+      });
+    } catch (error) {
+      if (isConditionalCheckFailure(error)) {
+        return res.status(409).json({
+          message:
+            "Trạng thái hoàn tiền vừa được thay đổi. Hãy tải lại đơn hàng trước khi thử lại.",
+        });
+      }
+
+      throw error;
+    }
+
+    if (!lockedOrder) {
+      return res.status(500).json({
+        message: "Không thể tạo yêu cầu hoàn tiền.",
+      });
+    }
+
+    try {
+      const providerResult = await createZaloPayRefund({
+        merchantRefundId,
+        zpTransactionId: existingOrder.paymentTransactionId,
+        amount: existingOrder.total,
+        description: refundReason,
+      });
+
+      const pendingOrder = await markZaloPayRefundPending({
+        orderId: existingOrder.orderId,
+        merchantRefundId,
+        providerRefundId: providerResult.providerRefundId,
+        providerMessage: providerResult.returnMessage,
+      });
+
+      return res.status(202).json({
+        data: pendingOrder ?? lockedOrder,
+        message:
+          "Đã gửi yêu cầu hoàn tiền đến ZaloPay. Hãy truy vấn lại để xác nhận kết quả.",
+      });
+    } catch (error) {
+      const message =
+        error instanceof ZaloPayRefundError
+          ? error.message
+          : "Không thể gửi yêu cầu hoàn tiền đến ZaloPay.";
+
+      try {
+        await markZaloPayRefundFailed({
+          orderId: existingOrder.orderId,
+          merchantRefundId,
+          message,
+        });
+      } catch (syncError) {
+        console.error("Không thể đồng bộ lỗi hoàn tiền vào DynamoDB.", syncError);
+      }
+
+      return res.status(502).json({
+        message,
+      });
+    }
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Không thể khởi tạo hoàn tiền ZaloPay.",
+    });
+  }
+});
+
+app.patch("/admin/orders/:orderId/refund/query", async (req, res) => {
+  try {
+    const orderId = req.params.orderId.trim();
+
+    if (!orderId) {
+      return res.status(400).json({
+        message: "Mã đơn hàng không hợp lệ.",
+      });
+    }
+
+    const existingOrder = await getOrderById(orderId);
+
+    if (!existingOrder) {
+      return res.status(404).json({
+        message: "Không tìm thấy đơn hàng.",
+      });
+    }
+
+    if (
+      existingOrder.paymentMethod !== "ZALOPAY" ||
+      existingOrder.paymentStatus !== "PAID" ||
+      existingOrder.orderStatus !== "CANCELLED"
+    ) {
+      return res.status(409).json({
+        message: "Đơn hàng không đủ điều kiện để truy vấn hoàn tiền ZaloPay.",
+      });
+    }
+
+    if (!existingOrder.refundMerchantId) {
+      return res.status(409).json({
+        message: "Đơn hàng chưa có yêu cầu hoàn tiền ZaloPay.",
+      });
+    }
+
+    if (existingOrder.refundStatus === "REFUNDED") {
+      return res.json({
+        data: existingOrder,
+        message: "Đơn hàng đã được hoàn tiền.",
+      });
+    }
+
+    const providerResult = await queryZaloPayRefund(
+      existingOrder.refundMerchantId
+    );
+
+    if (providerResult.providerState === "UNKNOWN") {
+      return res.status(202).json({
+        data: existingOrder,
+        message: providerResult.returnMessage,
+      });
+    }
+
+    const updatedOrder = await syncZaloPayRefundStatus({
+      orderId: existingOrder.orderId,
+      merchantRefundId: existingOrder.refundMerchantId,
+      status: providerResult.providerState,
+      providerRefundId: providerResult.providerRefundId,
+      providerMessage: providerResult.returnMessage,
+    });
+
+    const orderAfterSync = updatedOrder ?? existingOrder;
+
+    // Chỉ gửi email khi DynamoDB vừa chuyển trạng thái sang REFUNDED.
+    // Các lần query sau sẽ return sớm ở nhánh refundStatus === "REFUNDED".
+    if (updatedOrder?.refundStatus === "REFUNDED") {
+      await sendRefundCompletedEmail(updatedOrder);
+    }
+
+    return res.json({
+      data: orderAfterSync,
+      message: providerResult.returnMessage,
+    });
+  } catch (error) {
+    if (error instanceof ZaloPayRefundError) {
+      return res.status(502).json({
+        message: error.message,
+      });
+    }
+
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Không thể truy vấn trạng thái hoàn tiền ZaloPay.",
     });
   }
 });
