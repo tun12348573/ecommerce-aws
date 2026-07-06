@@ -1,70 +1,158 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: Ecommerce AWS backend with separate Cognito pools for admin and customers
-
 Parameters:
   ProductsTableName:
     Type: String
     Default: EcommerceProducts
-
   OrdersTableName:
     Type: String
     Default: EcommerceOrders
-
   AlertEmail:
     Type: String
     Default: thinhdaongoc1@gmail.com
-    Description: Email nhận cảnh báo vận hành từ CloudWatch và SNS.
-
+    Description:
+      "Email nh\u1EADn c\u1EA3nh b\xE1o v\u1EADn h\xE0nh t\u1EEB CloudWatch\
+      \ v\xE0 SNS."
   AllowedCorsOrigins:
     Type: String
-    Default: "https://dfjng6e5jz4mf.cloudfront.net,http://localhost:3000,http://127.0.0.1:3000"
-    Description: Danh sách origin được phép gọi API, phân tách bằng dấu phẩy.
-
+    Default: https://dfjng6e5jz4mf.cloudfront.net,http://localhost:3000,http://127.0.0.1:3000
+    Description:
+      "Danh s\xE1ch origin \u0111\u01B0\u1EE3c ph\xE9p g\u1ECDi API, ph\xE2\
+      n t\xE1ch b\u1EB1ng d\u1EA5u ph\u1EA9y."
   AdminMfaMode:
     Type: String
     Default: OPTIONAL
     AllowedValues:
       - OPTIONAL
-      - ON
-    Description: MFA cho admin. Giữ OPTIONAL đến khi frontend hỗ trợ TOTP MFA.
-
-# The Orders table is managed outside this SAM stack. Create these DynamoDB GSIs
-# separately with the AWS CLI before deploying the repository changes:
-# - OrdersByCustomerIndex: customerUserId (HASH), createdAt (RANGE)
-# - RefundsByStatusIndex: refundStatus (HASH), refundRequestedAt (RANGE)
-# - PendingPaymentByExpiryIndex: pendingPaymentStatus (HASH),
-#   zalopayPaymentExpiresAt (RANGE)
+      - "ON"
+    Description:
+      "MFA cho admin. Gi\u1EEF OPTIONAL \u0111\u1EBFn khi frontend h\u1ED7\
+      \ tr\u1EE3 TOTP MFA."
 Resources:
+  EcommerceProductsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName:
+        Ref: ProductsTableName
+      BillingMode: PROVISIONED
+      ProvisionedThroughput:
+        ReadCapacityUnits: 1
+        WriteCapacityUnits: 1
+      AttributeDefinitions:
+        - AttributeName: productId
+          AttributeType: S
+        - AttributeName: slug
+          AttributeType: S
+      KeySchema:
+        - AttributeName: productId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: SlugIndex
+          KeySchema:
+            - AttributeName: slug
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+          ProvisionedThroughput:
+            ReadCapacityUnits: 1
+            WriteCapacityUnits: 1
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+        RecoveryPeriodInDays: 35
+      DeletionProtectionEnabled: false
+
+  EcommerceOrdersTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName:
+        Ref: OrdersTableName
+      BillingMode: PROVISIONED
+      ProvisionedThroughput:
+        ReadCapacityUnits: 1
+        WriteCapacityUnits: 1
+      AttributeDefinitions:
+        - AttributeName: orderId
+          AttributeType: S
+        - AttributeName: customerUserId
+          AttributeType: S
+        - AttributeName: createdAt
+          AttributeType: S
+        - AttributeName: refundStatus
+          AttributeType: S
+        - AttributeName: refundRequestedAt
+          AttributeType: S
+        - AttributeName: pendingPaymentStatus
+          AttributeType: S
+        - AttributeName: zalopayPaymentExpiresAt
+          AttributeType: S
+      KeySchema:
+        - AttributeName: orderId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: OrdersByCustomerIndex
+          KeySchema:
+            - AttributeName: customerUserId
+              KeyType: HASH
+            - AttributeName: createdAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+          ProvisionedThroughput:
+            ReadCapacityUnits: 1
+            WriteCapacityUnits: 1
+        - IndexName: RefundsByStatusIndex
+          KeySchema:
+            - AttributeName: refundStatus
+              KeyType: HASH
+            - AttributeName: refundRequestedAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+          ProvisionedThroughput:
+            ReadCapacityUnits: 1
+            WriteCapacityUnits: 1
+        - IndexName: PendingPaymentByExpiryIndex
+          KeySchema:
+            - AttributeName: pendingPaymentStatus
+              KeyType: HASH
+            - AttributeName: zalopayPaymentExpiresAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+          ProvisionedThroughput:
+            ReadCapacityUnits: 1
+            WriteCapacityUnits: 1
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+        RecoveryPeriodInDays: 35
+      DeletionProtectionEnabled: false
+
   AdminUserPool:
     Type: AWS::Cognito::UserPool
     Properties:
       UserPoolName: ecommerce-aws-admin-users
-
       AliasAttributes:
         - email
-
       AutoVerifiedAttributes:
         - email
-
       UsernameConfiguration:
         CaseSensitive: false
-
       AdminCreateUserConfig:
         AllowAdminCreateUserOnly: true
-
       DeletionProtection: ACTIVE
-
       AccountRecoverySetting:
         RecoveryMechanisms:
           - Name: verified_email
             Priority: 1
-
-      MfaConfiguration: !Ref AdminMfaMode
-
+      MfaConfiguration:
+        Ref: AdminMfaMode
       EnabledMfas:
         - SOFTWARE_TOKEN_MFA
-
       Policies:
         PasswordPolicy:
           MinimumLength: 12
@@ -73,43 +161,35 @@ Resources:
           RequireNumbers: true
           RequireSymbols: true
           TemporaryPasswordValidityDays: 7
-
+    Metadata:
+      SamResourceId: AdminUserPool
   AdminUserPoolClient:
     Type: AWS::Cognito::UserPoolClient
     Properties:
       ClientName: ecommerce-aws-admin-web
-      UserPoolId: !Ref AdminUserPool
-
+      UserPoolId:
+        Ref: AdminUserPool
       GenerateSecret: false
-
       ExplicitAuthFlows:
         - ALLOW_USER_PASSWORD_AUTH
         - ALLOW_USER_SRP_AUTH
         - ALLOW_REFRESH_TOKEN_AUTH
-
       PreventUserExistenceErrors: ENABLED
-
-  # Giữ pool cũ nguyên cấu hình để CloudFormation không cố đổi AliasAttributes.
-  # Pool này không dùng cho đăng ký mới.
+    Metadata:
+      SamResourceId: AdminUserPoolClient
   CustomerUserPool:
     Type: AWS::Cognito::UserPool
     Properties:
       UserPoolName: ecommerce-aws-customer-users
-
       AliasAttributes:
         - email
-
       AutoVerifiedAttributes:
         - email
-
       UsernameConfiguration:
         CaseSensitive: false
-
       AdminCreateUserConfig:
         AllowAdminCreateUserOnly: false
-
       MfaConfiguration: "OFF"
-
       Policies:
         PasswordPolicy:
           MinimumLength: 8
@@ -117,48 +197,40 @@ Resources:
           RequireUppercase: true
           RequireNumbers: true
           RequireSymbols: false
-
       Schema:
         - Name: email
           AttributeDataType: String
           Required: true
           Mutable: true
-
+    Metadata:
+      SamResourceId: CustomerUserPool
   CustomerUserPoolClient:
     Type: AWS::Cognito::UserPoolClient
     Properties:
       ClientName: ecommerce-aws-customer-web
-      UserPoolId: !Ref CustomerUserPool
-
+      UserPoolId:
+        Ref: CustomerUserPool
       GenerateSecret: false
-
       ExplicitAuthFlows:
         - ALLOW_USER_PASSWORD_AUTH
         - ALLOW_USER_SRP_AUTH
         - ALLOW_REFRESH_TOKEN_AUTH
-
       PreventUserExistenceErrors: ENABLED
-
-  # Pool mới dùng UsernameAttributes=email để frontend có thể dùng email làm Username khi SignUp.
+    Metadata:
+      SamResourceId: CustomerUserPoolClient
   CustomerUserPoolV2:
     Type: AWS::Cognito::UserPool
     Properties:
       UserPoolName: ecommerce-aws-customer-users-v2
-
       UsernameAttributes:
         - email
-
       AutoVerifiedAttributes:
         - email
-
       UsernameConfiguration:
         CaseSensitive: false
-
       AdminCreateUserConfig:
         AllowAdminCreateUserOnly: false
-
       MfaConfiguration: "OFF"
-
       Policies:
         PasswordPolicy:
           MinimumLength: 8
@@ -166,93 +238,96 @@ Resources:
           RequireUppercase: true
           RequireNumbers: true
           RequireSymbols: false
-
       Schema:
         - Name: email
           AttributeDataType: String
           Required: true
           Mutable: true
-
+    Metadata:
+      SamResourceId: CustomerUserPoolV2
   CustomerUserPoolClientV2:
     Type: AWS::Cognito::UserPoolClient
     Properties:
       ClientName: ecommerce-aws-customer-web-v2
-      UserPoolId: !Ref CustomerUserPoolV2
-
+      UserPoolId:
+        Ref: CustomerUserPoolV2
       GenerateSecret: false
-
       ExplicitAuthFlows:
         - ALLOW_USER_PASSWORD_AUTH
         - ALLOW_USER_SRP_AUTH
         - ALLOW_REFRESH_TOKEN_AUTH
-
       PreventUserExistenceErrors: ENABLED
-
+    Metadata:
+      SamResourceId: CustomerUserPoolClientV2
   EcommerceHttpApiAccessLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub "/aws/apigateway/${AWS::StackName}-http-api-access"
+      LogGroupName:
+        Fn::Sub: /aws/apigateway/${AWS::StackName}-http-api-access
       RetentionInDays: 30
-
+    Metadata:
+      SamResourceId: EcommerceHttpApiAccessLogGroup
   EcommerceHttpApi:
     Type: AWS::Serverless::HttpApi
     Properties:
       StageName: prod
-
       AccessLogSettings:
-        DestinationArn: !GetAtt EcommerceHttpApiAccessLogGroup.Arn
-        Format: >-
-          {"requestId":"$context.requestId","ip":"$context.identity.sourceIp","requestTime":"$context.requestTime","routeKey":"$context.routeKey","status":"$context.status","responseLength":"$context.responseLength"}
-
+        DestinationArn:
+          Fn::GetAtt:
+            - EcommerceHttpApiAccessLogGroup
+            - Arn
+        Format: '{"requestId":"$context.requestId","ip":"$context.identity.sourceIp","requestTime":"$context.requestTime","routeKey":"$context.routeKey","status":"$context.status","responseLength":"$context.responseLength"}'
       DefaultRouteSettings:
         DetailedMetricsEnabled: true
         ThrottlingBurstLimit: 50
         ThrottlingRateLimit: 25
-
       Auth:
         Authorizers:
           AdminJwtAuthorizer:
-            IdentitySource: "$request.header.Authorization"
-
+            IdentitySource: $request.header.Authorization
             JwtConfiguration:
-              issuer: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${AdminUserPool}"
+              issuer:
+                Fn::Sub: https://cognito-idp.${AWS::Region}.amazonaws.com/${AdminUserPool}
               audience:
-                - !Ref AdminUserPoolClient
-
+                - Ref: AdminUserPoolClient
           CustomerJwtAuthorizer:
-            IdentitySource: "$request.header.Authorization"
-
+            IdentitySource: $request.header.Authorization
             JwtConfiguration:
-              issuer: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${CustomerUserPoolV2}"
+              issuer:
+                Fn::Sub: https://cognito-idp.${AWS::Region}.amazonaws.com/${CustomerUserPoolV2}
               audience:
-                - !Ref CustomerUserPoolClientV2
-
+                - Ref: CustomerUserPoolClientV2
+    Metadata:
+      SamResourceId: EcommerceHttpApi
   EcommerceBackendFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: ../backend/
-      Handler: src/lambda.handler
+      Handler: lambda.handler
       Runtime: nodejs22.x
-
       Architectures:
         - arm64
-
       MemorySize: 256
       Timeout: 10
-
       Environment:
         Variables:
           SES_FROM_EMAIL: thinhdaongoc1@gmail.com
-          PRODUCTS_TABLE: !Ref ProductsTableName
-          ORDERS_TABLE: !Ref OrdersTableName
-          PRODUCT_IMAGES_BUCKET: !Ref FrontendBucket
-          PRODUCT_IMAGES_BASE_URL: !Sub "https://${FrontendDistribution.DomainName}"
+          PRODUCTS_TABLE:
+            Ref: ProductsTableName
+          ORDERS_TABLE:
+            Ref: OrdersTableName
+          PRODUCT_IMAGES_BUCKET:
+            Ref: FrontendBucket
+          PRODUCT_IMAGES_BASE_URL:
+            Fn::Sub: https://${FrontendDistribution.DomainName}
           ZALOPAY_SECRET_ID: ecommerce-aws/zalopay/sandbox
           ZALOPAY_PAYMENT_RESERVATION_MINUTES: "15"
-          ALLOWED_CORS_ORIGINS: !Ref AllowedCorsOrigins
-          ZALOPAY_CALLBACK_URL: "https://89yap0gq5k.execute-api.ap-southeast-1.amazonaws.com/prod/payments/zalopay/callback"
-          ZALOPAY_REDIRECT_URL: !Sub "https://${FrontendDistribution.DomainName}/checkout/success/"
-
+          ALLOWED_CORS_ORIGINS:
+            Ref: AllowedCorsOrigins
+          ZALOPAY_CALLBACK_URL: https://89yap0gq5k.execute-api.ap-southeast-1.amazonaws.com/prod/payments/zalopay/callback
+          ZALOPAY_REDIRECT_URL:
+            Fn::Sub: https://${FrontendDistribution.DomainName}/checkout/success/
+          NODE_OPTIONS: " --enable-source-maps"
       Policies:
         - Statement:
             Effect: Allow
@@ -265,103 +340,99 @@ Resources:
               - dynamodb:Scan
               - dynamodb:TransactWriteItems
             Resource:
-              - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ProductsTableName}"
-              - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ProductsTableName}/index/*"
-              - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${OrdersTableName}"
-              - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${OrdersTableName}/index/*"
-
+              - Fn::Sub: arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ProductsTableName}
+              - Fn::Sub: arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ProductsTableName}/index/*
+              - Fn::Sub: arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${OrdersTableName}
+              - Fn::Sub: arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${OrdersTableName}/index/*
         - Statement:
             Effect: Allow
             Action:
               - s3:PutObject
-            Resource: !Sub "${FrontendBucket.Arn}/uploads/products/*"
-
+            Resource:
+              Fn::Sub: ${FrontendBucket.Arn}/uploads/products/*
         - Statement:
             Effect: Allow
             Action:
               - secretsmanager:GetSecretValue
-            Resource: !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:ecommerce-aws/zalopay/sandbox-*"
-
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:ecommerce-aws/zalopay/sandbox-*
         - Statement:
             Effect: Allow
             Action:
               - ses:SendEmail
-            Resource: !Sub "arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/thinhdaongoc1@gmail.com"
-
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/thinhdaongoc1@gmail.com
       Events:
         PublicApi:
           Type: HttpApi
           Properties:
-            ApiId: !Ref EcommerceHttpApi
-            Path: "/{proxy+}"
+            ApiId:
+              Ref: EcommerceHttpApi
+            Path: /{proxy+}
             Method: ANY
-
         AdminApi:
           Type: HttpApi
           Properties:
-            ApiId: !Ref EcommerceHttpApi
-            Path: "/admin/{proxy+}"
+            ApiId:
+              Ref: EcommerceHttpApi
+            Path: /admin/{proxy+}
             Method: ANY
             Auth:
               Authorizer: AdminJwtAuthorizer
-
         AdminCorsPreflight:
           Type: HttpApi
           Properties:
-            ApiId: !Ref EcommerceHttpApi
-            Path: "/admin/{proxy+}"
+            ApiId:
+              Ref: EcommerceHttpApi
+            Path: /admin/{proxy+}
             Method: OPTIONS
-
         CustomerApi:
           Type: HttpApi
           Properties:
-            ApiId: !Ref EcommerceHttpApi
-            Path: "/account/{proxy+}"
+            ApiId:
+              Ref: EcommerceHttpApi
+            Path: /account/{proxy+}
             Method: ANY
             Auth:
               Authorizer: CustomerJwtAuthorizer
-
         CustomerCorsPreflight:
           Type: HttpApi
           Properties:
-            ApiId: !Ref EcommerceHttpApi
-            Path: "/account/{proxy+}"
+            ApiId:
+              Ref: EcommerceHttpApi
+            Path: /account/{proxy+}
             Method: OPTIONS
-
     Metadata:
       BuildMethod: esbuild
       BuildProperties:
         EntryPoints:
           - src/lambda.ts
-        Target: es2020
         Format: cjs
-        Sourcemap: true
         Minify: false
-
+        Sourcemap: true
+        Target: es2020
+      SamResourceId: EcommerceBackendFunction
   RefundReconciliationFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: ../backend/
-      Handler: src/refund-scheduler.handler
+      Handler: refund-scheduler.handler
       Runtime: nodejs22.x
-
       Architectures:
         - arm64
-
       MemorySize: 256
       Timeout: 60
-
       EventInvokeConfig:
         MaximumEventAgeInSeconds: 3600
         MaximumRetryAttempts: 2
-
       Environment:
         Variables:
           SES_FROM_EMAIL: thinhdaongoc1@gmail.com
-          ORDERS_TABLE: !Ref OrdersTableName
+          ORDERS_TABLE:
+            Ref: OrdersTableName
           ZALOPAY_SECRET_ID: ecommerce-aws/zalopay/sandbox
           REFUND_RECONCILIATION_BATCH_SIZE: 20
-
+          NODE_OPTIONS: " --enable-source-maps"
       Policies:
         - Statement:
             Effect: Allow
@@ -369,70 +440,69 @@ Resources:
               - dynamodb:Query
               - dynamodb:UpdateItem
             Resource:
-              - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${OrdersTableName}"
-              - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${OrdersTableName}/index/*"
-
+              - Fn::Sub: arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${OrdersTableName}
+              - Fn::Sub: arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${OrdersTableName}/index/*
         - Statement:
             Effect: Allow
             Action:
               - secretsmanager:GetSecretValue
-            Resource: !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:ecommerce-aws/zalopay/sandbox-*"
-
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:ecommerce-aws/zalopay/sandbox-*
         - Statement:
             Effect: Allow
             Action:
               - ses:SendEmail
-            Resource: !Sub "arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/thinhdaongoc1@gmail.com"
-
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/thinhdaongoc1@gmail.com
       Events:
         RefundReconciliationSchedule:
           Type: ScheduleV2
           Properties:
-            Name: !Sub "${AWS::StackName}-refund-reconciliation"
-            Description: Tự động đồng bộ các yêu cầu hoàn tiền ZaloPay đang xử lý.
-            ScheduleExpression: "rate(5 minutes)"
+            Name:
+              Fn::Sub: ${AWS::StackName}-refund-reconciliation
+            Description:
+              "T\u1EF1 \u0111\u1ED9ng \u0111\u1ED3ng b\u1ED9 c\xE1c y\xEA\
+              u c\u1EA7u ho\xE0n ti\u1EC1n ZaloPay \u0111ang x\u1EED l\xFD."
+            ScheduleExpression: rate(5 minutes)
             FlexibleTimeWindow:
               Mode: "OFF"
             State: ENABLED
             RetryPolicy:
               MaximumEventAgeInSeconds: 3600
               MaximumRetryAttempts: 3
-
     Metadata:
       BuildMethod: esbuild
       BuildProperties:
         EntryPoints:
           - src/refund-scheduler.ts
-        Target: es2020
         Format: cjs
-        Sourcemap: true
         Minify: false
-
+        Sourcemap: true
+        Target: es2020
+      SamResourceId: RefundReconciliationFunction
   PaymentExpirySchedulerFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: ../backend/
-      Handler: src/payment-expiry-scheduler.handler
+      Handler: payment-expiry-scheduler.handler
       Runtime: nodejs22.x
-
       Architectures:
         - arm64
-
       MemorySize: 256
       Timeout: 60
-
       EventInvokeConfig:
         MaximumEventAgeInSeconds: 3600
         MaximumRetryAttempts: 2
-
       Environment:
         Variables:
           SES_FROM_EMAIL: thinhdaongoc1@gmail.com
-          PRODUCTS_TABLE: !Ref ProductsTableName
-          ORDERS_TABLE: !Ref OrdersTableName
+          PRODUCTS_TABLE:
+            Ref: ProductsTableName
+          ORDERS_TABLE:
+            Ref: OrdersTableName
           ZALOPAY_SECRET_ID: ecommerce-aws/zalopay/sandbox
           PAYMENT_EXPIRY_RECONCILIATION_BATCH_SIZE: 20
-
+          NODE_OPTIONS: " --enable-source-maps"
       Policies:
         - Statement:
             Effect: Allow
@@ -442,64 +512,70 @@ Resources:
               - dynamodb:UpdateItem
               - dynamodb:TransactWriteItems
             Resource:
-              - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ProductsTableName}"
-              - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${OrdersTableName}"
-              - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${OrdersTableName}/index/*"
-
+              - Fn::Sub: arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ProductsTableName}
+              - Fn::Sub: arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${OrdersTableName}
+              - Fn::Sub: arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${OrdersTableName}/index/*
         - Statement:
             Effect: Allow
             Action:
               - secretsmanager:GetSecretValue
-            Resource: !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:ecommerce-aws/zalopay/sandbox-*"
-
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:ecommerce-aws/zalopay/sandbox-*
         - Statement:
             Effect: Allow
             Action:
               - ses:SendEmail
-            Resource: !Sub "arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/thinhdaongoc1@gmail.com"
-
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/thinhdaongoc1@gmail.com
       Events:
         PaymentExpirySchedule:
           Type: ScheduleV2
           Properties:
-            Name: !Sub "${AWS::StackName}-payment-expiry"
-            Description: Tự động hủy đơn ZaloPay hết hạn và hoàn tồn kho.
-            ScheduleExpression: "rate(5 minutes)"
+            Name:
+              Fn::Sub: ${AWS::StackName}-payment-expiry
+            Description:
+              "T\u1EF1 \u0111\u1ED9ng h\u1EE7y \u0111\u01A1n ZaloPay h\u1EBF\
+              t h\u1EA1n v\xE0 ho\xE0n t\u1ED3n kho."
+            ScheduleExpression: rate(5 minutes)
             FlexibleTimeWindow:
               Mode: "OFF"
             State: ENABLED
             RetryPolicy:
               MaximumEventAgeInSeconds: 3600
               MaximumRetryAttempts: 3
-
     Metadata:
       BuildMethod: esbuild
       BuildProperties:
         EntryPoints:
           - src/payment-expiry-scheduler.ts
-        Target: es2020
         Format: cjs
-        Sourcemap: true
         Minify: false
-
+        Sourcemap: true
+        Target: es2020
+      SamResourceId: PaymentExpirySchedulerFunction
   OperationsAlertTopic:
     Type: AWS::SNS::Topic
     Properties:
-      TopicName: !Sub "${AWS::StackName}-operations-alerts"
+      TopicName:
+        Fn::Sub: ${AWS::StackName}-operations-alerts
       DisplayName: AWS Shop Alerts
-
+    Metadata:
+      SamResourceId: OperationsAlertTopic
   OperationsAlertEmailSubscription:
     Type: AWS::SNS::Subscription
     Properties:
-      TopicArn: !Ref OperationsAlertTopic
+      TopicArn:
+        Ref: OperationsAlertTopic
       Protocol: email
-      Endpoint: !Ref AlertEmail
-
+      Endpoint:
+        Ref: AlertEmail
+    Metadata:
+      SamResourceId: OperationsAlertEmailSubscription
   OperationsAlertTopicPolicy:
     Type: AWS::SNS::TopicPolicy
     Properties:
       Topics:
-        - !Ref OperationsAlertTopic
+        - Ref: OperationsAlertTopic
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -508,21 +584,26 @@ Resources:
             Principal:
               Service: cloudwatch.amazonaws.com
             Action: sns:Publish
-            Resource: !Ref OperationsAlertTopic
+            Resource:
+              Ref: OperationsAlertTopic
             Condition:
               StringEquals:
-                AWS:SourceAccount: !Ref AWS::AccountId
-
+                AWS:SourceAccount:
+                  Ref: AWS::AccountId
+    Metadata:
+      SamResourceId: OperationsAlertTopicPolicy
   EcommerceBackendLambdaErrorsAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub "${AWS::StackName}-backend-lambda-errors"
-      AlarmDescription: Báo khi Lambda API chính phát sinh lỗi.
+      AlarmName:
+        Fn::Sub: ${AWS::StackName}-backend-lambda-errors
+      AlarmDescription: "B\xE1o khi Lambda API ch\xEDnh ph\xE1t sinh l\u1ED7i."
       Namespace: AWS/Lambda
       MetricName: Errors
       Dimensions:
         - Name: FunctionName
-          Value: !Ref EcommerceBackendFunction
+          Value:
+            Ref: EcommerceBackendFunction
       Statistic: Sum
       Period: 300
       EvaluationPeriods: 1
@@ -531,18 +612,23 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions:
-        - !Ref OperationsAlertTopic
-
+        - Ref: OperationsAlertTopic
+    Metadata:
+      SamResourceId: EcommerceBackendLambdaErrorsAlarm
   RefundSchedulerLambdaErrorsAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub "${AWS::StackName}-refund-scheduler-lambda-errors"
-      AlarmDescription: Báo khi Lambda tự kiểm tra hoàn tiền bị lỗi.
+      AlarmName:
+        Fn::Sub: ${AWS::StackName}-refund-scheduler-lambda-errors
+      AlarmDescription:
+        "B\xE1o khi Lambda t\u1EF1 ki\u1EC3m tra ho\xE0n ti\u1EC1\
+        n b\u1ECB l\u1ED7i."
       Namespace: AWS/Lambda
       MetricName: Errors
       Dimensions:
         - Name: FunctionName
-          Value: !Ref RefundReconciliationFunction
+          Value:
+            Ref: RefundReconciliationFunction
       Statistic: Sum
       Period: 300
       EvaluationPeriods: 1
@@ -551,18 +637,23 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions:
-        - !Ref OperationsAlertTopic
-
+        - Ref: OperationsAlertTopic
+    Metadata:
+      SamResourceId: RefundSchedulerLambdaErrorsAlarm
   PaymentExpirySchedulerLambdaErrorsAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub "${AWS::StackName}-payment-expiry-scheduler-errors"
-      AlarmDescription: Báo khi Lambda tự hủy đơn ZaloPay hết hạn bị lỗi.
+      AlarmName:
+        Fn::Sub: ${AWS::StackName}-payment-expiry-scheduler-errors
+      AlarmDescription:
+        "B\xE1o khi Lambda t\u1EF1 h\u1EE7y \u0111\u01A1n ZaloPay\
+        \ h\u1EBFt h\u1EA1n b\u1ECB l\u1ED7i."
       Namespace: AWS/Lambda
       MetricName: Errors
       Dimensions:
         - Name: FunctionName
-          Value: !Ref PaymentExpirySchedulerFunction
+          Value:
+            Ref: PaymentExpirySchedulerFunction
       Statistic: Sum
       Period: 300
       EvaluationPeriods: 1
@@ -571,18 +662,21 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions:
-        - !Ref OperationsAlertTopic
-
+        - Ref: OperationsAlertTopic
+    Metadata:
+      SamResourceId: PaymentExpirySchedulerLambdaErrorsAlarm
   EcommerceApi5xxAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub "${AWS::StackName}-api-5xx-errors"
-      AlarmDescription: Báo khi HTTP API trả lỗi 5xx.
+      AlarmName:
+        Fn::Sub: ${AWS::StackName}-api-5xx-errors
+      AlarmDescription: "B\xE1o khi HTTP API tr\u1EA3 l\u1ED7i 5xx."
       Namespace: AWS/ApiGateway
       MetricName: 5xx
       Dimensions:
         - Name: ApiId
-          Value: !Ref EcommerceHttpApi
+          Value:
+            Ref: EcommerceHttpApi
         - Name: Stage
           Value: prod
       Statistic: Sum
@@ -593,13 +687,17 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions:
-        - !Ref OperationsAlertTopic
-
+        - Ref: OperationsAlertTopic
+    Metadata:
+      SamResourceId: EcommerceApi5xxAlarm
   RefundSchedulerTargetErrorsAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub "${AWS::StackName}-refund-scheduler-target-errors"
-      AlarmDescription: Báo khi EventBridge Scheduler không gọi được Lambda hoàn tiền.
+      AlarmName:
+        Fn::Sub: ${AWS::StackName}-refund-scheduler-target-errors
+      AlarmDescription:
+        "B\xE1o khi EventBridge Scheduler kh\xF4ng g\u1ECDi \u0111\
+        \u01B0\u1EE3c Lambda ho\xE0n ti\u1EC1n."
       Namespace: AWS/Scheduler
       MetricName: TargetErrorCount
       Dimensions:
@@ -613,8 +711,9 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions:
-        - !Ref OperationsAlertTopic
-
+        - Ref: OperationsAlertTopic
+    Metadata:
+      SamResourceId: RefundSchedulerTargetErrorsAlarm
   FrontendBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Retain
@@ -625,13 +724,11 @@ Resources:
       OwnershipControls:
         Rules:
           - ObjectOwnership: BucketOwnerEnforced
-
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         IgnorePublicAcls: true
         BlockPublicPolicy: true
         RestrictPublicBuckets: true
-
       CorsConfiguration:
         CorsRules:
           - AllowedOrigins:
@@ -647,72 +744,64 @@ Resources:
             ExposedHeaders:
               - ETag
             MaxAge: 3000
-
+    Metadata:
+      SamResourceId: FrontendBucket
   FrontendOriginAccessControl:
     Type: AWS::CloudFront::OriginAccessControl
     Properties:
       OriginAccessControlConfig:
-        Name: !Sub "${AWS::StackName}-frontend-oac"
+        Name:
+          Fn::Sub: ${AWS::StackName}-frontend-oac
         Description: CloudFront access control for private frontend S3 bucket
         OriginAccessControlOriginType: s3
         SigningBehavior: always
         SigningProtocol: sigv4
-
+    Metadata:
+      SamResourceId: FrontendOriginAccessControl
   FrontendUrlRewriteFunction:
     Type: AWS::CloudFront::Function
     Properties:
-      Name: !Sub "${AWS::StackName}-url-rewrite"
+      Name:
+        Fn::Sub: ${AWS::StackName}-url-rewrite
       AutoPublish: true
-
       FunctionConfig:
         Comment: Rewrite static export routes to index.html
         Runtime: cloudfront-js-2.0
-
-      FunctionCode: |
-        async function handler(event) {
-          var request = event.request;
-          var uri = request.uri;
-
-          if (uri.endsWith("/")) {
-            request.uri += "index.html";
-          } else if (!uri.includes(".")) {
-            request.uri += "/index.html";
-          }
-
-          return request;
-        }
-
+      FunctionCode:
+        "async function handler(event) {\n  var request = event.request;\n\
+        \  var uri = request.uri;\n\n  if (uri.endsWith(\"/\")) {\n    request.uri\
+        \ += \"index.html\";\n  } else if (!uri.includes(\".\")) {\n    request.uri\
+        \ += \"/index.html\";\n  }\n\n  return request;\n}\n"
+    Metadata:
+      SamResourceId: FrontendUrlRewriteFunction
   FrontendResponseHeadersPolicy:
     Type: AWS::CloudFront::ResponseHeadersPolicy
     Properties:
       ResponseHeadersPolicyConfig:
-        Name: !Sub "${AWS::StackName}-frontend-security-headers"
+        Name:
+          Fn::Sub: ${AWS::StackName}-frontend-security-headers
         Comment: Security headers for ecommerce frontend
-
         SecurityHeadersConfig:
           ContentTypeOptions:
             Override: true
-
           FrameOptions:
             FrameOption: DENY
             Override: true
-
           ReferrerPolicy:
             ReferrerPolicy: strict-origin-when-cross-origin
             Override: true
-
           StrictTransportSecurity:
             AccessControlMaxAgeSec: 31536000
             IncludeSubdomains: true
             Preload: false
             Override: true
-
         CustomHeadersConfig:
           Items:
             - Header: Permissions-Policy
-              Value: "camera=(), microphone=(), geolocation=()"
+              Value: camera=(), microphone=(), geolocation=()
               Override: true
-
+    Metadata:
+      SamResourceId: FrontendResponseHeadersPolicy
   FrontendDistribution:
     Type: AWS::CloudFront::Distribution
     Properties:
@@ -722,115 +811,115 @@ Resources:
         DefaultRootObject: index.html
         HttpVersion: http2and3
         IPV6Enabled: true
-
         Origins:
           - Id: FrontendS3Origin
-            DomainName: !GetAtt FrontendBucket.RegionalDomainName
-            OriginAccessControlId: !GetAtt FrontendOriginAccessControl.Id
-
+            DomainName:
+              Fn::GetAtt:
+                - FrontendBucket
+                - RegionalDomainName
+            OriginAccessControlId:
+              Fn::GetAtt:
+                - FrontendOriginAccessControl
+                - Id
             S3OriginConfig:
               OriginAccessIdentity: ""
-
         DefaultCacheBehavior:
           TargetOriginId: FrontendS3Origin
           ViewerProtocolPolicy: redirect-to-https
-
           AllowedMethods:
             - GET
             - HEAD
             - OPTIONS
-
           CachedMethods:
             - GET
             - HEAD
-
           Compress: true
-          ResponseHeadersPolicyId: !Ref FrontendResponseHeadersPolicy
-
+          ResponseHeadersPolicyId:
+            Ref: FrontendResponseHeadersPolicy
           ForwardedValues:
             QueryString: false
-
             Cookies:
               Forward: none
-
           FunctionAssociations:
             - EventType: viewer-request
-              FunctionARN: !GetAtt FrontendUrlRewriteFunction.FunctionMetadata.FunctionARN
-
+              FunctionARN:
+                Fn::GetAtt:
+                  - FrontendUrlRewriteFunction
+                  - FunctionMetadata.FunctionARN
+    Metadata:
+      SamResourceId: FrontendDistribution
   FrontendBucketPolicy:
     Type: AWS::S3::BucketPolicy
     Properties:
-      Bucket: !Ref FrontendBucket
-
+      Bucket:
+        Ref: FrontendBucket
       PolicyDocument:
         Version: "2012-10-17"
-
         Statement:
           - Sid: AllowCloudFrontReadOnly
-
             Effect: Allow
-
             Principal:
               Service: cloudfront.amazonaws.com
-
             Action:
               - s3:GetObject
-
-            Resource: !Sub "${FrontendBucket.Arn}/*"
-
+            Resource:
+              Fn::Sub: ${FrontendBucket.Arn}/*
             Condition:
               StringEquals:
-                AWS:SourceArn: !Sub "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${FrontendDistribution}"
-
+                AWS:SourceArn:
+                  Fn::Sub: arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${FrontendDistribution}
+    Metadata:
+      SamResourceId: FrontendBucketPolicy
 Outputs:
   ApiUrl:
     Description: API Gateway endpoint
-    Value: !Sub "https://${EcommerceHttpApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
-
+    Value:
+      Fn::Sub: https://${EcommerceHttpApi}.execute-api.${AWS::Region}.amazonaws.com/prod
   AdminUserPoolId:
     Description: Cognito admin user pool ID
-    Value: !Ref AdminUserPool
-
+    Value:
+      Ref: AdminUserPool
   AdminUserPoolClientId:
     Description: Cognito admin app client ID
-    Value: !Ref AdminUserPoolClient
-
+    Value:
+      Ref: AdminUserPoolClient
   AdminUserPoolIssuer:
     Description: Cognito JWT issuer URL
-    Value: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${AdminUserPool}"
-
+    Value:
+      Fn::Sub: https://cognito-idp.${AWS::Region}.amazonaws.com/${AdminUserPool}
   CustomerUserPoolId:
     Description: Cognito customer user pool ID
-    Value: !Ref CustomerUserPoolV2
-
+    Value:
+      Ref: CustomerUserPoolV2
   CustomerUserPoolClientId:
     Description: Cognito customer app client ID
-    Value: !Ref CustomerUserPoolClientV2
-
+    Value:
+      Ref: CustomerUserPoolClientV2
   CustomerUserPoolIssuer:
     Description: Cognito customer JWT issuer URL
-    Value: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${CustomerUserPoolV2}"
-
+    Value:
+      Fn::Sub: https://cognito-idp.${AWS::Region}.amazonaws.com/${CustomerUserPoolV2}
   RefundReconciliationFunctionName:
     Description: Lambda function that automatically reconciles active ZaloPay refunds
-    Value: !Ref RefundReconciliationFunction
-
+    Value:
+      Ref: RefundReconciliationFunction
   FrontendBucketName:
     Description: Private S3 bucket storing the static frontend files
-    Value: !Ref FrontendBucket
-
+    Value:
+      Ref: FrontendBucket
   FrontendDistributionId:
     Description: CloudFront distribution ID for the frontend
-    Value: !Ref FrontendDistribution
-
+    Value:
+      Ref: FrontendDistribution
   OperationsAlertTopicArn:
     Description: SNS topic ARN for operational alerts
-    Value: !Ref OperationsAlertTopic
-
+    Value:
+      Ref: OperationsAlertTopic
   ApiAccessLogGroupName:
     Description: CloudWatch log group for HTTP API access logs
-    Value: !Ref EcommerceHttpApiAccessLogGroup
-
+    Value:
+      Ref: EcommerceHttpApiAccessLogGroup
   WebsiteUrl:
     Description: Public CloudFront URL for the ecommerce website
-    Value: !Sub "https://${FrontendDistribution.DomainName}"
+    Value:
+      Fn::Sub: https://${FrontendDistribution.DomainName}
