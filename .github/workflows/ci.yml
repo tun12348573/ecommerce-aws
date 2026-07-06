@@ -1,0 +1,115 @@
+name: Build checks
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-build:
+    name: Backend TypeScript build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build TypeScript
+        run: npm run build
+
+  frontend-build:
+    name: Frontend Next.js build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    env:
+      NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
+      NEXT_PUBLIC_COGNITO_REGION: ${{ vars.NEXT_PUBLIC_COGNITO_REGION }}
+      NEXT_PUBLIC_COGNITO_CLIENT_ID: ${{ vars.NEXT_PUBLIC_COGNITO_CLIENT_ID }}
+      NEXT_PUBLIC_CUSTOMER_COGNITO_REGION: ${{ vars.NEXT_PUBLIC_CUSTOMER_COGNITO_REGION }}
+      NEXT_PUBLIC_CUSTOMER_COGNITO_CLIENT_ID: ${{ vars.NEXT_PUBLIC_CUSTOMER_COGNITO_CLIENT_ID }}
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Next.js static export
+        run: npm run build
+
+  infrastructure-build:
+    name: SAM validate and build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infrastructure
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Set up AWS SAM CLI
+        uses: aws-actions/setup-sam@v3
+        with:
+          use-installer: true
+          token: ${{ github.token }}
+
+      - name: Show tool versions
+        run: |
+          node --version
+          npm --version
+          sam --version
+
+      - name: Validate SAM template
+        run: sam validate --template-file template.yaml
+
+      - name: Build SAM application
+        run: sam build --template-file template.yaml
