@@ -79,6 +79,9 @@ jobs:
   infrastructure-build:
     name: SAM validate and build
     runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ap-southeast-1
+      AWS_DEFAULT_REGION: ap-southeast-1
     defaults:
       run:
         working-directory: infrastructure
@@ -109,7 +112,7 @@ jobs:
           sam --version
 
       - name: Validate SAM template
-        run: sam validate --template-file template.yaml
+        run: sam validate --template-file template.yaml --region ap-southeast-1
 
       - name: Build SAM application
         run: sam build --template-file template.yaml
