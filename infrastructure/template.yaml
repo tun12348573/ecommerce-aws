@@ -11,6 +11,11 @@ Parameters:
     Type: String
     Default: EcommerceOrders
 
+  AlertEmail:
+    Type: String
+    Default: thinhdaongoc1@gmail.com
+    Description: Email nhận cảnh báo vận hành từ CloudWatch và SNS.
+
 # The Orders table is managed outside this SAM stack. Create these DynamoDB GSIs
 # separately with the AWS CLI before deploying the repository changes:
 # - OrdersByCustomerIndex: customerUserId (HASH), createdAt (RANGE)
@@ -360,6 +365,119 @@ Resources:
         Sourcemap: true
         Minify: false
 
+  OperationsAlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "${AWS::StackName}-operations-alerts"
+      DisplayName: AWS Shop Alerts
+
+  OperationsAlertEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref OperationsAlertTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+
+  OperationsAlertTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref OperationsAlertTopic
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowCloudWatchAlarmsToPublish
+            Effect: Allow
+            Principal:
+              Service: cloudwatch.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref OperationsAlertTopic
+            Condition:
+              StringEquals:
+                AWS:SourceAccount: !Ref AWS::AccountId
+
+  EcommerceBackendLambdaErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-backend-lambda-errors"
+      AlarmDescription: Báo khi Lambda API chính phát sinh lỗi.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref EcommerceBackendFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref OperationsAlertTopic
+
+  RefundSchedulerLambdaErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-refund-scheduler-lambda-errors"
+      AlarmDescription: Báo khi Lambda tự kiểm tra hoàn tiền bị lỗi.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref RefundReconciliationFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref OperationsAlertTopic
+
+  EcommerceApi5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-api-5xx-errors"
+      AlarmDescription: Báo khi HTTP API trả lỗi 5xx.
+      Namespace: AWS/ApiGateway
+      MetricName: 5xx
+      Dimensions:
+        - Name: ApiId
+          Value: !Ref EcommerceHttpApi
+        - Name: Stage
+          Value: prod
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref OperationsAlertTopic
+
+  RefundSchedulerTargetErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-refund-scheduler-target-errors"
+      AlarmDescription: Báo khi EventBridge Scheduler không gọi được Lambda hoàn tiền.
+      Namespace: AWS/Scheduler
+      MetricName: TargetErrorCount
+      Dimensions:
+        - Name: ScheduleGroup
+          Value: default
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref OperationsAlertTopic
+
   FrontendBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Retain
@@ -533,6 +651,10 @@ Outputs:
   FrontendDistributionId:
     Description: CloudFront distribution ID for the frontend
     Value: !Ref FrontendDistribution
+
+  OperationsAlertTopicArn:
+    Description: SNS topic ARN for operational alerts
+    Value: !Ref OperationsAlertTopic
 
   WebsiteUrl:
     Description: Public CloudFront URL for the ecommerce website
