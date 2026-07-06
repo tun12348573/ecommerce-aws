@@ -1,5 +1,5 @@
 import {
-  listZaloPayRefundOrders,
+  listActiveZaloPayRefundOrders,
   recordZaloPayRefundCheck,
   syncZaloPayRefundStatus,
 } from "../repositories/order.repository";
@@ -99,12 +99,7 @@ async function recordNonFinalCheck(input: {
 export async function reconcileZaloPayRefunds(): Promise<RefundReconciliationSummary> {
   const batchSize = getBatchSize();
 
-  const activeRefunds = (await listZaloPayRefundOrders())
-    .filter(
-      (order) =>
-        order.refundStatus === "REQUESTING" ||
-        order.refundStatus === "PENDING"
-    )
+  const activeRefunds = (await listActiveZaloPayRefundOrders())
     .sort(
       (first, second) =>
         getLastReconciliationTime(first) -

@@ -11,6 +11,10 @@ Parameters:
     Type: String
     Default: EcommerceOrders
 
+# The Orders table is managed outside this SAM stack. Create these DynamoDB GSIs
+# separately with the AWS CLI before deploying the repository changes:
+# - OrdersByCustomerIndex: customerUserId (HASH), createdAt (RANGE)
+# - RefundsByStatusIndex: refundStatus (HASH), refundRequestedAt (RANGE)
 Resources:
   AdminUserPool:
     Type: AWS::Cognito::UserPool
@@ -216,6 +220,7 @@ Resources:
               - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ProductsTableName}"
               - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ProductsTableName}/index/*"
               - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${OrdersTableName}"
+              - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${OrdersTableName}/index/*"
 
         - Statement:
             Effect: Allow
@@ -313,9 +318,11 @@ Resources:
         - Statement:
             Effect: Allow
             Action:
-              - dynamodb:Scan
+              - dynamodb:Query
               - dynamodb:UpdateItem
-            Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${OrdersTableName}"
+            Resource:
+              - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${OrdersTableName}"
+              - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${OrdersTableName}/index/*"
 
         - Statement:
             Effect: Allow

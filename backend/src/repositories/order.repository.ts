@@ -1,5 +1,7 @@
 import {
   GetCommand,
+  QueryCommand,
+  type QueryCommandInput,
   ScanCommand,
   TransactWriteCommand,
   UpdateCommand,
@@ -76,6 +78,85 @@ type RecordZaloPayRefundCheckInput = {
   message: string;
 };
 
+const ORDERS_BY_CUSTOMER_INDEX = "OrdersByCustomerIndex";
+const REFUNDS_BY_STATUS_INDEX = "RefundsByStatusIndex";
+
+const REFUND_STATUSES: RefundStatus[] = [
+  "REQUESTING",
+  "PENDING",
+  "REFUNDED",
+  "FAILED",
+];
+
+function sortOrdersNewestFirst(orders: Order[]): Order[] {
+  return [...orders].sort((first, second) => {
+    return (
+      new Date(second.createdAt).getTime() -
+      new Date(first.createdAt).getTime()
+    );
+  });
+}
+
+async function queryOrdersByCustomerUserId(
+  customerUserId: string
+): Promise<Order[]> {
+  const orders: Order[] = [];
+  let exclusiveStartKey: QueryCommandInput["ExclusiveStartKey"];
+
+  do {
+    const result = await docClient.send(
+      new QueryCommand({
+        TableName: getOrdersTableName(),
+        IndexName: ORDERS_BY_CUSTOMER_INDEX,
+        KeyConditionExpression: "#customerUserId = :customerUserId",
+        ExpressionAttributeNames: {
+          "#customerUserId": "customerUserId",
+        },
+        ExpressionAttributeValues: {
+          ":customerUserId": customerUserId,
+        },
+        ScanIndexForward: false,
+        ExclusiveStartKey: exclusiveStartKey,
+      })
+    );
+
+    orders.push(...((result.Items ?? []) as Order[]));
+    exclusiveStartKey = result.LastEvaluatedKey;
+  } while (exclusiveStartKey);
+
+  return orders;
+}
+
+async function queryRefundOrdersByStatus(
+  refundStatus: RefundStatus
+): Promise<Order[]> {
+  const orders: Order[] = [];
+  let exclusiveStartKey: QueryCommandInput["ExclusiveStartKey"];
+
+  do {
+    const result = await docClient.send(
+      new QueryCommand({
+        TableName: getOrdersTableName(),
+        IndexName: REFUNDS_BY_STATUS_INDEX,
+        KeyConditionExpression: "#refundStatus = :refundStatus",
+        ExpressionAttributeNames: {
+          "#refundStatus": "refundStatus",
+        },
+        ExpressionAttributeValues: {
+          ":refundStatus": refundStatus,
+        },
+        ScanIndexForward: false,
+        ExclusiveStartKey: exclusiveStartKey,
+      })
+    );
+
+    orders.push(...((result.Items ?? []) as Order[]));
+    exclusiveStartKey = result.LastEvaluatedKey;
+  } while (exclusiveStartKey);
+
+  return orders;
+}
+
 export async function listOrders(): Promise<Order[]> {
   const result = await docClient.send(
     new ScanCommand({
@@ -83,51 +164,46 @@ export async function listOrders(): Promise<Order[]> {
     })
   );
 
-  const orders = (result.Items ?? []) as Order[];
-
-  return orders.sort((a, b) => {
-    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-  });
+  return sortOrdersNewestFirst((result.Items ?? []) as Order[]);
 }
 
 export async function listZaloPayRefundOrders(
   refundStatus?: RefundStatus
 ): Promise<Order[]> {
-  const orders = await listOrders();
+  const statuses = refundStatus ? [refundStatus] : REFUND_STATUSES;
 
-  return orders.filter((order) => {
-    if (order.paymentMethod !== "ZALOPAY" || !order.refundStatus) {
-      return false;
-    }
+  const resultGroups = await Promise.all(
+    statuses.map((status) => queryRefundOrdersByStatus(status))
+  );
 
-    return !refundStatus || order.refundStatus === refundStatus;
-  });
+  const orders = resultGroups.flat();
+
+  return sortOrdersNewestFirst(
+    orders.filter(
+      (order) =>
+        order.paymentMethod === "ZALOPAY" &&
+        order.refundStatus !== undefined
+    )
+  );
+}
+
+export async function listActiveZaloPayRefundOrders(): Promise<Order[]> {
+  const resultGroups = await Promise.all([
+    queryRefundOrdersByStatus("REQUESTING"),
+    queryRefundOrdersByStatus("PENDING"),
+  ]);
+
+  return sortOrdersNewestFirst(
+    resultGroups
+      .flat()
+      .filter((order) => order.paymentMethod === "ZALOPAY")
+  );
 }
 
 export async function listOrdersByCustomerUserId(
   customerUserId: string
 ): Promise<Order[]> {
-  const result = await docClient.send(
-    new ScanCommand({
-      TableName: getOrdersTableName(),
-      FilterExpression: "#customerUserId = :customerUserId",
-      ExpressionAttributeNames: {
-        "#customerUserId": "customerUserId",
-      },
-      ExpressionAttributeValues: {
-        ":customerUserId": customerUserId,
-      },
-    })
-  );
-
-  const orders = (result.Items ?? []) as Order[];
-
-  return orders.sort((first, second) => {
-    return (
-      new Date(second.createdAt).getTime() -
-      new Date(first.createdAt).getTime()
-    );
-  });
+  return queryOrdersByCustomerUserId(customerUserId);
 }
 
 export async function getOrderById(orderId: string): Promise<Order | null> {
