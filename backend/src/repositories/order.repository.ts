@@ -70,6 +70,12 @@ type SyncZaloPayRefundStatusInput = {
   providerMessage: string;
 };
 
+type RecordZaloPayRefundCheckInput = {
+  orderId: string;
+  merchantRefundId: string;
+  message: string;
+};
+
 export async function listOrders(): Promise<Order[]> {
   const result = await docClient.send(
     new ScanCommand({
@@ -573,6 +579,47 @@ export async function syncZaloPayRefundStatus(
         "attribute_exists(orderId) AND #refundMerchantId = :merchantRefundId AND #refundStatus IN (:requesting, :pending, :failed)",
       ExpressionAttributeNames: expressionAttributeNames,
       ExpressionAttributeValues: expressionAttributeValues,
+      ReturnValues: "ALL_NEW",
+    })
+  );
+
+  return (result.Attributes as Order | undefined) ?? null;
+}
+
+/**
+ * Records a reconciliation attempt without changing the provider refund state.
+ * Used when ZaloPay returns an unknown state or the provider cannot be reached.
+ */
+export async function recordZaloPayRefundCheck(
+  input: RecordZaloPayRefundCheckInput
+): Promise<Order | null> {
+  const now = new Date().toISOString();
+
+  const result = await docClient.send(
+    new UpdateCommand({
+      TableName: getOrdersTableName(),
+      Key: {
+        orderId: input.orderId,
+      },
+      UpdateExpression:
+        "SET #refundLastCheckedAt = :checkedAt, #refundLastMessage = :message, #updatedAt = :updatedAt",
+      ConditionExpression:
+        "attribute_exists(orderId) AND #refundMerchantId = :merchantRefundId AND #refundStatus IN (:requesting, :pending)",
+      ExpressionAttributeNames: {
+        "#refundStatus": "refundStatus",
+        "#refundMerchantId": "refundMerchantId",
+        "#refundLastCheckedAt": "refundLastCheckedAt",
+        "#refundLastMessage": "refundLastMessage",
+        "#updatedAt": "updatedAt",
+      },
+      ExpressionAttributeValues: {
+        ":merchantRefundId": input.merchantRefundId,
+        ":requesting": "REQUESTING",
+        ":pending": "PENDING",
+        ":checkedAt": now,
+        ":message": input.message,
+        ":updatedAt": now,
+      },
       ReturnValues: "ALL_NEW",
     })
   );

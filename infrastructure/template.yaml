@@ -285,6 +285,74 @@ Resources:
         Sourcemap: true
         Minify: false
 
+  RefundReconciliationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend/
+      Handler: src/refund-scheduler.handler
+      Runtime: nodejs22.x
+
+      Architectures:
+        - arm64
+
+      MemorySize: 256
+      Timeout: 60
+
+      EventInvokeConfig:
+        MaximumEventAgeInSeconds: 3600
+        MaximumRetryAttempts: 2
+
+      Environment:
+        Variables:
+          SES_FROM_EMAIL: thinhdaongoc1@gmail.com
+          ORDERS_TABLE: !Ref OrdersTableName
+          ZALOPAY_SECRET_ID: ecommerce-aws/zalopay/sandbox
+          REFUND_RECONCILIATION_BATCH_SIZE: 20
+
+      Policies:
+        - Statement:
+            Effect: Allow
+            Action:
+              - dynamodb:Scan
+              - dynamodb:UpdateItem
+            Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${OrdersTableName}"
+
+        - Statement:
+            Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource: !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:ecommerce-aws/zalopay/sandbox-*"
+
+        - Statement:
+            Effect: Allow
+            Action:
+              - ses:SendEmail
+            Resource: !Sub "arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/thinhdaongoc1@gmail.com"
+
+      Events:
+        RefundReconciliationSchedule:
+          Type: ScheduleV2
+          Properties:
+            Name: !Sub "${AWS::StackName}-refund-reconciliation"
+            Description: Tự động đồng bộ các yêu cầu hoàn tiền ZaloPay đang xử lý.
+            ScheduleExpression: "rate(5 minutes)"
+            FlexibleTimeWindow:
+              Mode: "OFF"
+            State: ENABLED
+            RetryPolicy:
+              MaximumEventAgeInSeconds: 3600
+              MaximumRetryAttempts: 3
+
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+          - src/refund-scheduler.ts
+        Target: es2020
+        Format: cjs
+        Sourcemap: true
+        Minify: false
+
   FrontendBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Retain
@@ -446,6 +514,10 @@ Outputs:
   CustomerUserPoolIssuer:
     Description: Cognito customer JWT issuer URL
     Value: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${CustomerUserPoolV2}"
+
+  RefundReconciliationFunctionName:
+    Description: Lambda function that automatically reconciles active ZaloPay refunds
+    Value: !Ref RefundReconciliationFunction
 
   FrontendBucketName:
     Description: Private S3 bucket storing the static frontend files
