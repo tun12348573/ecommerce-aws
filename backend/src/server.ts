@@ -312,6 +312,65 @@ function parsePaymentMethod(value: unknown): PaymentMethod | null {
   return null;
 }
 
+function isZaloPayAwaitingPayment(order: Order): boolean {
+  return (
+    order.paymentMethod === "ZALOPAY" &&
+    order.paymentStatus !== "PAID"
+  );
+}
+
+function getOrderTransitionError(
+  order: Order,
+  nextStatus: OrderStatus
+): string | null {
+  if (order.orderStatus === nextStatus) {
+    return "Đơn hàng đang ở trạng thái này.";
+  }
+
+  if (order.orderStatus === "CANCELLED") {
+    return "Đơn đã hủy không thể chuyển sang trạng thái khác.";
+  }
+
+  if (order.orderStatus === "COMPLETED") {
+    return "Đơn đã hoàn thành không thể chuyển sang trạng thái khác.";
+  }
+
+  if (nextStatus === "CANCELLED") {
+    if (
+      order.orderStatus === "PROCESSING" ||
+      order.orderStatus === "SHIPPING"
+    ) {
+      return null;
+    }
+
+    return "Chỉ có thể hủy đơn đang xử lý hoặc đang giao hàng.";
+  }
+
+  if (
+    order.orderStatus === "PROCESSING" &&
+    nextStatus === "SHIPPING"
+  ) {
+    if (isZaloPayAwaitingPayment(order)) {
+      return "Đơn ZaloPay chưa thanh toán nên không thể chuyển sang Đang giao.";
+    }
+
+    return null;
+  }
+
+  if (
+    order.orderStatus === "SHIPPING" &&
+    nextStatus === "COMPLETED"
+  ) {
+    if (isZaloPayAwaitingPayment(order)) {
+      return "Đơn ZaloPay chưa thanh toán nên không thể hoàn thành.";
+    }
+
+    return null;
+  }
+
+  return "Luồng hợp lệ là PROCESSING → SHIPPING → COMPLETED.";
+}
+
 function getZaloPayPaymentReservationMinutes(): number {
   const value = Number(
     process.env.ZALOPAY_PAYMENT_RESERVATION_MINUTES ?? "15"
@@ -866,6 +925,21 @@ app.post("/payments/zalopay/callback", async (req, res) => {
       return res.json({
         return_code: 1,
         return_message: "success",
+      });
+    }
+
+    if (order.orderStatus === "CANCELLED") {
+      console.warn(
+        "Bỏ qua callback ZaloPay cho đơn đã hủy.",
+        {
+          orderId: order.orderId,
+          appTransId: callback.app_trans_id,
+        }
+      );
+
+      return res.json({
+        return_code: 1,
+        return_message: "order already cancelled",
       });
     }
 
@@ -1577,6 +1651,13 @@ app.patch("/admin/orders/:orderId/shipping", async (req, res) => {
       });
     }
 
+    if (isZaloPayAwaitingPayment(existingOrder)) {
+      return res.status(409).json({
+        message:
+          "Đơn ZaloPay chưa thanh toán nên chưa thể cập nhật vận chuyển.",
+      });
+    }
+
     const updatedOrder = await updateOrderShipping({
       orderId: existingOrder.orderId,
       shippingCarrier: carrier,
@@ -1597,6 +1678,13 @@ app.patch("/admin/orders/:orderId/shipping", async (req, res) => {
     });
   } catch (error) {
     console.error(error);
+
+    if (isConditionalCheckFailure(error)) {
+      return res.status(409).json({
+        message:
+          "Đơn hàng vừa thay đổi trạng thái hoặc chưa đủ điều kiện vận chuyển. Hãy tải lại trang.",
+      });
+    }
 
     return res.status(500).json({
       message: "Không thể cập nhật thông tin vận chuyển.",
@@ -1631,23 +1719,18 @@ app.patch("/admin/orders/:orderId/status", async (req, res) => {
       });
     }
 
+    const transitionError = getOrderTransitionError(
+      existingOrder,
+      orderStatus
+    );
+
+    if (transitionError) {
+      return res.status(409).json({
+        message: transitionError,
+      });
+    }
+
     if (orderStatus === "CANCELLED") {
-      if (existingOrder.orderStatus === "CANCELLED") {
-        return res.status(409).json({
-          message: "Đơn hàng đã được hủy trước đó.",
-        });
-      }
-
-      if (
-        existingOrder.orderStatus !== "PROCESSING" &&
-        existingOrder.orderStatus !== "SHIPPING"
-      ) {
-        return res.status(409).json({
-          message:
-            "Chỉ có thể hủy đơn đang xử lý hoặc đang giao hàng.",
-        });
-      }
-
       try {
         await cancelOrderAndRestock(existingOrder);
       } catch (error) {
@@ -1657,13 +1740,10 @@ app.patch("/admin/orders/:orderId/status", async (req, res) => {
           });
         }
 
-        if (
-          error instanceof Error &&
-          error.name === "TransactionCanceledException"
-        ) {
+        if (isConditionalCheckFailure(error)) {
           return res.status(409).json({
             message:
-              "Đơn hàng hoặc tồn kho vừa được cập nhật. Hãy tải lại trang và kiểm tra lại.",
+              "Đơn hàng hoặc tồn kho vừa thay đổi. Hãy tải lại trước khi thử lại.",
           });
         }
 
@@ -1672,26 +1752,42 @@ app.patch("/admin/orders/:orderId/status", async (req, res) => {
 
       const cancelledOrder = await getOrderById(existingOrder.orderId);
 
+      if (!cancelledOrder) {
+        return res.status(500).json({
+          message: "Không thể lấy trạng thái đơn sau khi hủy.",
+        });
+      }
+
       return res.json({
         data: cancelledOrder,
       });
     }
 
-    if (existingOrder.orderStatus === "CANCELLED") {
-      return res.status(409).json({
-        message:
-          "Không thể chuyển đơn đã hủy sang trạng thái khác vì tồn kho đã được hoàn lại.",
+    try {
+      const updatedOrder = await updateOrderStatus(
+        existingOrder.orderId,
+        orderStatus
+      );
+
+      if (!updatedOrder) {
+        return res.status(404).json({
+          message: "Không tìm thấy đơn hàng.",
+        });
+      }
+
+      return res.json({
+        data: updatedOrder,
       });
+    } catch (error) {
+      if (isConditionalCheckFailure(error)) {
+        return res.status(409).json({
+          message:
+            "Trạng thái hoặc thanh toán của đơn vừa thay đổi. Hãy tải lại trang.",
+        });
+      }
+
+      throw error;
     }
-
-    const updatedOrder = await updateOrderStatus(
-      req.params.orderId,
-      orderStatus
-    );
-
-    return res.json({
-      data: updatedOrder,
-    });
   } catch (error) {
     console.error(error);
 

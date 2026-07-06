@@ -16,7 +16,6 @@ import {
 import type {
   Order,
   OrderStatus,
-  OrderStatusHistoryItem,
   RefundStatus,
   ShippingCarrier,
 } from "../types/order";
@@ -304,6 +303,21 @@ export async function updateOrderStatus(
     return null;
   }
 
+  let expectedOrderStatus: OrderStatus;
+
+  switch (orderStatus) {
+    case "SHIPPING":
+      expectedOrderStatus = "PROCESSING";
+      break;
+    case "COMPLETED":
+      expectedOrderStatus = "SHIPPING";
+      break;
+    default:
+      throw new Error(
+        "updateOrderStatus chỉ hỗ trợ luồng PROCESSING → SHIPPING → COMPLETED."
+      );
+  }
+
   const now = new Date().toISOString();
 
   const shouldMarkPaid =
@@ -313,13 +327,22 @@ export async function updateOrderStatus(
       existingOrder.paymentMethod === "BANK_TRANSFER");
 
   const updateParts = [
-    "orderStatus = :orderStatus",
-    "updatedAt = :updatedAt",
-    "statusHistory = list_append(if_not_exists(statusHistory, :emptyStatusHistory), :newStatusHistory)",
+    "#orderStatus = :orderStatus",
+    "#updatedAt = :updatedAt",
+    "#statusHistory = list_append(if_not_exists(#statusHistory, :emptyStatusHistory), :newStatusHistory)",
   ];
+
+  const expressionAttributeNames: Record<string, string> = {
+    "#orderStatus": "orderStatus",
+    "#updatedAt": "updatedAt",
+    "#statusHistory": "statusHistory",
+    "#paymentMethod": "paymentMethod",
+    "#paymentStatus": "paymentStatus",
+  };
 
   const expressionAttributeValues: Record<string, unknown> = {
     ":orderStatus": orderStatus,
+    ":expectedOrderStatus": expectedOrderStatus,
     ":updatedAt": now,
     ":emptyStatusHistory": [],
     ":newStatusHistory": [
@@ -328,15 +351,19 @@ export async function updateOrderStatus(
         changedAt: now,
       },
     ],
+    ":zalopay": "ZALOPAY",
+    ":paid": "PAID",
   };
 
   if (shouldMarkPaid) {
     updateParts.push(
-      "paymentStatus = :paymentStatus",
-      "paidAt = :paidAt"
+      "#paymentStatus = :completedPaymentStatus",
+      "#paidAt = :paidAt"
     );
 
-    expressionAttributeValues[":paymentStatus"] = "PAID";
+    expressionAttributeNames["#paidAt"] = "paidAt";
+
+    expressionAttributeValues[":completedPaymentStatus"] = "PAID";
     expressionAttributeValues[":paidAt"] = now;
   }
 
@@ -347,6 +374,9 @@ export async function updateOrderStatus(
         orderId,
       },
       UpdateExpression: `SET ${updateParts.join(", ")}`,
+      ConditionExpression:
+        "attribute_exists(orderId) AND #orderStatus = :expectedOrderStatus AND (#paymentMethod <> :zalopay OR #paymentStatus = :paid)",
+      ExpressionAttributeNames: expressionAttributeNames,
       ExpressionAttributeValues: expressionAttributeValues,
       ReturnValues: "ALL_NEW",
     })
@@ -451,6 +481,15 @@ export async function updateOrderShipping(
     return null;
   }
 
+  if (
+    existingOrder.orderStatus !== "PROCESSING" &&
+    existingOrder.orderStatus !== "SHIPPING"
+  ) {
+    throw new Error(
+      "Chỉ có thể cập nhật vận chuyển cho đơn đang xử lý hoặc đang giao."
+    );
+  }
+
   const now = new Date().toISOString();
 
   const setParts = [
@@ -467,6 +506,8 @@ export async function updateOrderShipping(
     "#shippingTrackingCode": "shippingTrackingCode",
     "#orderStatus": "orderStatus",
     "#updatedAt": "updatedAt",
+    "#paymentMethod": "paymentMethod",
+    "#paymentStatus": "paymentStatus",
   };
 
   const expressionAttributeValues: Record<string, unknown> = {
@@ -477,10 +518,13 @@ export async function updateOrderShipping(
         : "",
     ":shippingTrackingCode": input.shippingTrackingCode.trim(),
     ":shippingStatus": "SHIPPING",
+    ":expectedOrderStatus": existingOrder.orderStatus,
+    ":zalopay": "ZALOPAY",
+    ":paid": "PAID",
     ":updatedAt": now,
   };
 
-  if (existingOrder.orderStatus !== "SHIPPING") {
+  if (existingOrder.orderStatus === "PROCESSING") {
     setParts.push(
       "#shippedAt = :shippedAt",
       "#statusHistory = list_append(if_not_exists(#statusHistory, :emptyStatusHistory), :shippingStatusHistory)"
@@ -506,6 +550,8 @@ export async function updateOrderShipping(
         orderId: input.orderId,
       },
       UpdateExpression: `SET ${setParts.join(", ")}`,
+      ConditionExpression:
+        "attribute_exists(orderId) AND #orderStatus = :expectedOrderStatus AND (#paymentMethod <> :zalopay OR #paymentStatus = :paid)",
       ExpressionAttributeNames: expressionAttributeNames,
       ExpressionAttributeValues: expressionAttributeValues,
       ReturnValues: "ALL_NEW",
