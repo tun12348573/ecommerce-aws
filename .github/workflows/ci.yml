@@ -99,6 +99,11 @@ jobs:
           cache: npm
           cache-dependency-path: backend/package-lock.json
 
+      - name: Install esbuild for AWS SAM
+        run: npm install --global esbuild@0.28.1
+
+      - name: Verify esbuild
+        run: esbuild --version
       - name: Set up AWS SAM CLI
         uses: aws-actions/setup-sam@v3
         with:
