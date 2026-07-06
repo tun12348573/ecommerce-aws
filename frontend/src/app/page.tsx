@@ -1,17 +1,9 @@
 import Link from "next/link";
-import { apiGet } from "@/lib/api";
-import type { Product } from "@/types/product";
-import { ProductCard } from "@/components/products/ProductCard";
+
 import { CustomerAccountMenu } from "@/components/customer/CustomerAccountMenu";
+import { FeaturedProductsSection } from "@/components/products/FeaturedProductsSection";
 
-type ProductsResponse = {
-  data: Product[];
-};
-
-export default async function HomePage() {
-  const response = await apiGet<ProductsResponse>("/products");
-  const products = response.data;
-
+export default function HomePage() {
   return (
     <main className="min-h-screen bg-gray-50 text-gray-900">
       <header className="sticky top-0 z-50 border-b bg-white/90 backdrop-blur">
@@ -20,35 +12,38 @@ export default async function HomePage() {
             AWS Shop
           </Link>
 
-        <div className="flex items-center gap-4">
-          <nav className="hidden items-center gap-8 text-sm font-medium md:flex">
-            <Link href="/" className="text-black">
-              Trang chủ
-            </Link>
+          <div className="flex items-center gap-4">
+            <nav className="hidden items-center gap-8 text-sm font-medium md:flex">
+              <Link href="/" className="text-black">
+                Trang chủ
+              </Link>
 
-            <Link href="/products/" className="text-gray-600 hover:text-black">
-              Sản phẩm
-            </Link>
+              <Link
+                href="/products/"
+                className="text-gray-600 hover:text-black"
+              >
+                Sản phẩm
+              </Link>
+
+              <Link
+                href="/track-order/"
+                className="text-gray-600 hover:text-black"
+              >
+                Tra cứu đơn
+              </Link>
+            </nav>
+
+            <CustomerAccountMenu />
 
             <Link
-              href="/track-order/"
-              className="text-gray-600 hover:text-black"
+              href="/cart/"
+              className="rounded-full bg-black px-5 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
             >
-              Tra cứu đơn
+              Giỏ hàng
             </Link>
-          </nav>
-
-          <CustomerAccountMenu />
-
-          <Link
-            href="/cart/"
-            className="rounded-full bg-black px-5 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
-          >
-            Giỏ hàng
-          </Link>
+          </div>
         </div>
-      </div>
-    </header>
+      </header>
 
       <section className="bg-white">
         <div className="mx-auto grid max-w-7xl gap-10 px-6 py-20 md:grid-cols-2 md:items-center">
@@ -68,14 +63,14 @@ export default async function HomePage() {
 
             <div className="flex flex-wrap gap-4">
               <Link
-                href="/products"
+                href="/products/"
                 className="rounded-xl bg-black px-6 py-3 text-sm font-bold text-white"
               >
                 Xem sản phẩm
               </Link>
 
               <Link
-                href="/about"
+                href="/about/"
                 className="rounded-xl border border-gray-300 px-6 py-3 text-sm font-bold"
               >
                 Tìm hiểu thêm
@@ -97,27 +92,7 @@ export default async function HomePage() {
         </div>
       </section>
 
-      <section className="mx-auto max-w-7xl px-6 py-16">
-        <div className="mb-10 flex items-end justify-between">
-          <div>
-            <p className="mb-2 text-sm font-bold uppercase text-blue-600">
-              Sản phẩm
-            </p>
-
-            <h2 className="text-3xl font-bold">Sản phẩm nổi bật</h2>
-          </div>
-
-          <Link href="/products" className="text-sm font-bold text-blue-600">
-            Xem tất cả
-          </Link>
-        </div>
-
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {products.map((product) => (
-            <ProductCard key={product.productId} product={product} />
-          ))}
-        </div>
-      </section>
+      <FeaturedProductsSection />
 
       <section className="border-t bg-white">
         <div className="mx-auto grid max-w-7xl gap-6 px-6 py-12 md:grid-cols-3">
@@ -131,7 +106,7 @@ export default async function HomePage() {
           <div className="rounded-2xl border p-6">
             <h3 className="mb-2 font-bold">Thanh toán an toàn</h3>
             <p className="text-sm text-gray-600">
-              Có thể tích hợp COD, chuyển khoản, MoMo hoặc VNPay.
+              Có thể tích hợp COD, chuyển khoản hoặc ZaloPay.
             </p>
           </div>
 

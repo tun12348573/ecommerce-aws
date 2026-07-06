@@ -2,17 +2,8 @@ import Link from "next/link";
 
 import { CustomerAccountMenu } from "@/components/customer/CustomerAccountMenu";
 import { ProductCatalogClient } from "@/components/products/ProductCatalogClient";
-import { apiGet } from "@/lib/api";
-import type { Product } from "@/types/product";
 
-type ProductsResponse = {
-  data: Product[];
-};
-
-export default async function ProductsPage() {
-  const response = await apiGet<ProductsResponse>("/products");
-  const products = response.data;
-
+export default function ProductsPage() {
   return (
     <main className="min-h-screen bg-gray-50 text-gray-900">
       <header className="border-b bg-white">
@@ -68,7 +59,7 @@ export default async function ProductsPage() {
         </div>
       </section>
 
-      <ProductCatalogClient products={products} />
+      <ProductCatalogClient />
     </main>
   );
 }

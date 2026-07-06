@@ -17,10 +17,11 @@ function formatPrice(value: number) {
 
 export function ProductCard({ product }: ProductCardProps) {
   const imageUrl = product.image?.trim();
+  const productHref = `/product/?slug=${encodeURIComponent(product.slug)}`;
 
   return (
     <article className="overflow-hidden rounded-3xl border bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-lg">
-      <Link href={`/products/${product.slug}/`}>
+      <Link href={productHref}>
         <div className="flex aspect-square items-center justify-center overflow-hidden bg-gray-100">
           {imageUrl ? (
             <img
@@ -42,7 +43,7 @@ export function ProductCard({ product }: ProductCardProps) {
           {product.category}
         </p>
 
-        <Link href={`/products/${product.slug}/`}>
+        <Link href={productHref}>
           <h3 className="mb-3 text-xl font-bold hover:text-blue-600">
             {product.name}
           </h3>
@@ -57,16 +58,20 @@ export function ProductCard({ product }: ProductCardProps) {
             {formatPrice(product.salePrice)}
           </span>
 
-          <span className="text-sm text-gray-400 line-through">
-            {formatPrice(product.price)}
-          </span>
+          {product.price > product.salePrice ? (
+            <span className="text-sm text-gray-400 line-through">
+              {formatPrice(product.price)}
+            </span>
+          ) : null}
         </div>
 
         <div className="mt-4">
           <LiveProductStock productId={product.productId} />
         </div>
 
-        <AddToCartButton product={product} />
+        <div className="mt-4">
+          <AddToCartButton product={product} />
+        </div>
       </div>
     </article>
   );
