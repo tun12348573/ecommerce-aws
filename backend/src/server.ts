@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 
 import cors from "cors";
 import express from "express";
-import type { Request, Response } from "express";
+import type { NextFunction, Request, Response } from "express";
 
 import {
   createProductImageUploadUrl,
@@ -78,10 +78,211 @@ import { buildAdminDashboard } from "./services/admin-dashboard.service";
 
 export const app = express();
 
-app.use(cors());
-app.use(express.json());
+const DEFAULT_ALLOWED_CORS_ORIGINS = [
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+  "https://dfjng6e5jz4mf.cloudfront.net",
+];
 
+function getAllowedCorsOrigins(): Set<string> {
+  const configuredOrigins = (process.env.ALLOWED_CORS_ORIGINS ?? "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
 
+  return new Set(
+    configuredOrigins.length > 0
+      ? configuredOrigins
+      : DEFAULT_ALLOWED_CORS_ORIGINS
+  );
+}
+
+const allowedCorsOrigins = getAllowedCorsOrigins();
+
+function isAllowedCorsOrigin(origin: string): boolean {
+  return allowedCorsOrigins.has(origin);
+}
+
+type RateLimitEntry = {
+  count: number;
+  resetAt: number;
+};
+
+type RateLimitOptions = {
+  name: string;
+  maxRequests: number;
+  windowMs: number;
+};
+
+const MAX_RATE_LIMIT_KEYS = 5_000;
+
+function getRateLimitClientKey(req: Request): string {
+  // API Gateway forwards the client address in X-Forwarded-For.
+  // This is only per-warm-Lambda burst protection; add AWS WAF before public launch
+  // for a distributed, account-level rate limit.
+  const forwardedFor = req.get("x-forwarded-for");
+
+  if (forwardedFor) {
+    const firstAddress = forwardedFor
+      .split(",")
+      .map((value) => value.trim())
+      .find(Boolean);
+
+    if (firstAddress) {
+      return firstAddress;
+    }
+  }
+
+  return req.socket.remoteAddress ?? "unknown";
+}
+
+function createRateLimiter(options: RateLimitOptions) {
+  const entries = new Map<string, RateLimitEntry>();
+  let lastCleanupAt = 0;
+
+  function removeExpiredEntries(now: number) {
+    if (now - lastCleanupAt < options.windowMs) {
+      return;
+    }
+
+    lastCleanupAt = now;
+
+    for (const [key, entry] of entries) {
+      if (entry.resetAt <= now) {
+        entries.delete(key);
+      }
+    }
+  }
+
+  return (req: Request, res: Response, next: NextFunction) => {
+    const now = Date.now();
+
+    removeExpiredEntries(now);
+
+    const key = `${options.name}:${getRateLimitClientKey(req)}`;
+    const existingEntry = entries.get(key);
+
+    const entry =
+      existingEntry && existingEntry.resetAt > now
+        ? existingEntry
+        : {
+            count: 0,
+            resetAt: now + options.windowMs,
+          };
+
+    if (!existingEntry && entries.size >= MAX_RATE_LIMIT_KEYS) {
+      // Fail open after clearing stale/old in-memory counters. This avoids an
+      // attacker filling Lambda memory with unbounded IP keys.
+      entries.clear();
+    }
+
+    entry.count += 1;
+    entries.set(key, entry);
+
+    const remaining = Math.max(options.maxRequests - entry.count, 0);
+    const retryAfterSeconds = Math.max(
+      Math.ceil((entry.resetAt - now) / 1000),
+      1
+    );
+
+    res.setHeader("RateLimit-Limit", String(options.maxRequests));
+    res.setHeader("RateLimit-Remaining", String(remaining));
+    res.setHeader("RateLimit-Reset", String(Math.ceil(entry.resetAt / 1000)));
+
+    if (entry.count > options.maxRequests) {
+      res.setHeader("Retry-After", String(retryAfterSeconds));
+
+      return res.status(429).json({
+        message: "Bạn thao tác quá nhanh. Vui lòng thử lại sau.",
+        retryAfterSeconds,
+      });
+    }
+
+    return next();
+  };
+}
+
+const checkoutRateLimiter = createRateLimiter({
+  name: "checkout",
+  maxRequests: 10,
+  windowMs: 15 * 60 * 1000,
+});
+
+const zaloPayRateLimiter = createRateLimiter({
+  name: "zalopay",
+  maxRequests: 20,
+  windowMs: 15 * 60 * 1000,
+});
+
+const zaloPayCallbackRateLimiter = createRateLimiter({
+  name: "zalopay-callback",
+  maxRequests: 120,
+  windowMs: 60 * 1000,
+});
+
+const orderTrackingRateLimiter = createRateLimiter({
+  name: "order-tracking",
+  maxRequests: 20,
+  windowMs: 15 * 60 * 1000,
+});
+
+app.disable("x-powered-by");
+
+app.use((req, res, next) => {
+  const requestId = randomUUID();
+
+  res.locals.requestId = requestId;
+  res.setHeader("X-Request-Id", requestId);
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader(
+    "Strict-Transport-Security",
+    "max-age=31536000; includeSubDomains"
+  );
+  res.setHeader(
+    "Content-Security-Policy",
+    "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+  );
+  res.setHeader(
+    "Permissions-Policy",
+    "camera=(), geolocation=(), microphone=(), payment=(), usb=()"
+  );
+  res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+  res.setHeader("Cache-Control", "no-store");
+
+  const origin = req.get("origin");
+
+  if (origin && !isAllowedCorsOrigin(origin)) {
+    return res.status(403).json({
+      message: "Origin không được phép gọi API này.",
+    });
+  }
+
+  return next();
+});
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      // ZaloPay callbacks and command-line testing do not send an Origin header.
+      callback(null, !origin || isAllowedCorsOrigin(origin));
+    },
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Authorization", "Content-Type", "X-Request-Id"],
+    exposedHeaders: [
+      "X-Request-Id",
+      "RateLimit-Limit",
+      "RateLimit-Remaining",
+      "RateLimit-Reset",
+      "Retry-After",
+    ],
+    maxAge: 600,
+    optionsSuccessStatus: 204,
+  })
+);
+
+app.use(express.json({ limit: "64kb", strict: true }));
 
 type CheckoutItemInput = {
   productId?: unknown;
@@ -564,7 +765,7 @@ function sendOrderCreationError(res: Response, error: unknown) {
   });
 }
 
-app.post("/orders", async (req, res) => {
+app.post("/orders", checkoutRateLimiter, async (req, res) => {
   try {
     const order = await createOrderFromCheckout(
       req.body as CreateOrderBody
@@ -578,7 +779,7 @@ app.post("/orders", async (req, res) => {
   }
 });
 
-app.post("/account/orders", async (req, res) => {
+app.post("/account/orders", checkoutRateLimiter, async (req, res) => {
   const authenticatedCustomer = getAuthenticatedCustomer(req);
 
   if (!authenticatedCustomer) {
@@ -752,7 +953,7 @@ app.patch("/account/orders/:orderId/cancel", async (req, res) => {
 // ZaloPay Sandbox Payment APIs
 // =========================
 
-app.post("/payments/zalopay/create", async (req, res) => {
+app.post("/payments/zalopay/create", zaloPayRateLimiter, async (req, res) => {
   try {
     const { orderId, phone } = req.body as {
       orderId?: unknown;
@@ -887,7 +1088,7 @@ app.post("/payments/zalopay/create", async (req, res) => {
   }
 });
 
-app.post("/payments/zalopay/callback", async (req, res) => {
+app.post("/payments/zalopay/callback", zaloPayCallbackRateLimiter, async (req, res) => {
   try {
     const { data, mac } = req.body as {
       data?: unknown;
@@ -986,7 +1187,7 @@ app.post("/payments/zalopay/callback", async (req, res) => {
   }
 });
 
-app.post("/payments/zalopay/query", async (req, res) => {
+app.post("/payments/zalopay/query", zaloPayRateLimiter, async (req, res) => {
   try {
     const { orderId, phone } = req.body as {
       orderId?: unknown;
@@ -1133,7 +1334,7 @@ app.post("/payments/zalopay/query", async (req, res) => {
   }
 });
 
-app.post("/order-tracking", async (req, res) => {
+app.post("/order-tracking", orderTrackingRateLimiter, async (req, res) => {
   try {
     const { orderId, phone } = req.body as {
       orderId?: unknown;
@@ -1952,6 +2153,45 @@ app.delete("/admin/products/:productId", async (req, res) => {
     });
   }
 });
+
+app.use(
+  (
+    error: unknown,
+    _req: Request,
+    res: Response,
+    _next: NextFunction
+  ) => {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "type" in error &&
+      (error as { type?: unknown }).type === "entity.too.large"
+    ) {
+      return res.status(413).json({
+        message: "Payload quá lớn. Giới hạn tối đa là 64 KB.",
+      });
+    }
+
+    if (
+      error instanceof SyntaxError &&
+      "body" in error
+    ) {
+      return res.status(400).json({
+        message: "JSON request body không hợp lệ.",
+      });
+    }
+
+    console.error("Unhandled Express error", {
+      requestId: res.locals.requestId,
+      error,
+    });
+
+    return res.status(500).json({
+      message: "Không thể xử lý yêu cầu.",
+      requestId: res.locals.requestId,
+    });
+  }
+);
 
 if (require.main === module) {
   const port = Number(process.env.PORT || 4000);

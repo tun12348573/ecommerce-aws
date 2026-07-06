@@ -16,10 +16,25 @@ Parameters:
     Default: thinhdaongoc1@gmail.com
     Description: Email nhận cảnh báo vận hành từ CloudWatch và SNS.
 
+  AllowedCorsOrigins:
+    Type: String
+    Default: "https://dfjng6e5jz4mf.cloudfront.net,http://localhost:3000,http://127.0.0.1:3000"
+    Description: Danh sách origin được phép gọi API, phân tách bằng dấu phẩy.
+
+  AdminMfaMode:
+    Type: String
+    Default: OPTIONAL
+    AllowedValues:
+      - OPTIONAL
+      - ON
+    Description: MFA cho admin. Giữ OPTIONAL đến khi frontend hỗ trợ TOTP MFA.
+
 # The Orders table is managed outside this SAM stack. Create these DynamoDB GSIs
 # separately with the AWS CLI before deploying the repository changes:
 # - OrdersByCustomerIndex: customerUserId (HASH), createdAt (RANGE)
 # - RefundsByStatusIndex: refundStatus (HASH), refundRequestedAt (RANGE)
+# - PendingPaymentByExpiryIndex: pendingPaymentStatus (HASH),
+#   zalopayPaymentExpiresAt (RANGE)
 Resources:
   AdminUserPool:
     Type: AWS::Cognito::UserPool
@@ -38,7 +53,17 @@ Resources:
       AdminCreateUserConfig:
         AllowAdminCreateUserOnly: true
 
-      MfaConfiguration: "OFF"
+      DeletionProtection: ACTIVE
+
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+
+      MfaConfiguration: !Ref AdminMfaMode
+
+      EnabledMfas:
+        - SOFTWARE_TOKEN_MFA
 
       Policies:
         PasswordPolicy:
@@ -163,10 +188,26 @@ Resources:
 
       PreventUserExistenceErrors: ENABLED
 
+  EcommerceHttpApiAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/apigateway/${AWS::StackName}-http-api-access"
+      RetentionInDays: 30
+
   EcommerceHttpApi:
     Type: AWS::Serverless::HttpApi
     Properties:
       StageName: prod
+
+      AccessLogSettings:
+        DestinationArn: !GetAtt EcommerceHttpApiAccessLogGroup.Arn
+        Format: >-
+          {"requestId":"$context.requestId","ip":"$context.identity.sourceIp","requestTime":"$context.requestTime","routeKey":"$context.routeKey","status":"$context.status","responseLength":"$context.responseLength"}
+
+      DefaultRouteSettings:
+        DetailedMetricsEnabled: true
+        ThrottlingBurstLimit: 50
+        ThrottlingRateLimit: 25
 
       Auth:
         Authorizers:
@@ -208,6 +249,7 @@ Resources:
           PRODUCT_IMAGES_BASE_URL: !Sub "https://${FrontendDistribution.DomainName}"
           ZALOPAY_SECRET_ID: ecommerce-aws/zalopay/sandbox
           ZALOPAY_PAYMENT_RESERVATION_MINUTES: "15"
+          ALLOWED_CORS_ORIGINS: !Ref AllowedCorsOrigins
           ZALOPAY_CALLBACK_URL: "https://89yap0gq5k.execute-api.ap-southeast-1.amazonaws.com/prod/payments/zalopay/callback"
           ZALOPAY_REDIRECT_URL: !Sub "https://${FrontendDistribution.DomainName}/checkout/success/"
 
@@ -511,6 +553,26 @@ Resources:
       AlarmActions:
         - !Ref OperationsAlertTopic
 
+  PaymentExpirySchedulerLambdaErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-payment-expiry-scheduler-errors"
+      AlarmDescription: Báo khi Lambda tự hủy đơn ZaloPay hết hạn bị lỗi.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref PaymentExpirySchedulerFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref OperationsAlertTopic
+
   EcommerceApi5xxAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
@@ -620,6 +682,37 @@ Resources:
           return request;
         }
 
+  FrontendResponseHeadersPolicy:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub "${AWS::StackName}-frontend-security-headers"
+        Comment: Security headers for ecommerce frontend
+
+        SecurityHeadersConfig:
+          ContentTypeOptions:
+            Override: true
+
+          FrameOptions:
+            FrameOption: DENY
+            Override: true
+
+          ReferrerPolicy:
+            ReferrerPolicy: strict-origin-when-cross-origin
+            Override: true
+
+          StrictTransportSecurity:
+            AccessControlMaxAgeSec: 31536000
+            IncludeSubdomains: true
+            Preload: false
+            Override: true
+
+        CustomHeadersConfig:
+          Items:
+            - Header: Permissions-Policy
+              Value: "camera=(), microphone=(), geolocation=()"
+              Override: true
+
   FrontendDistribution:
     Type: AWS::CloudFront::Distribution
     Properties:
@@ -652,6 +745,7 @@ Resources:
             - HEAD
 
           Compress: true
+          ResponseHeadersPolicyId: !Ref FrontendResponseHeadersPolicy
 
           ForwardedValues:
             QueryString: false
@@ -732,6 +826,10 @@ Outputs:
   OperationsAlertTopicArn:
     Description: SNS topic ARN for operational alerts
     Value: !Ref OperationsAlertTopic
+
+  ApiAccessLogGroupName:
+    Description: CloudWatch log group for HTTP API access logs
+    Value: !Ref EcommerceHttpApiAccessLogGroup
 
   WebsiteUrl:
     Description: Public CloudFront URL for the ecommerce website
