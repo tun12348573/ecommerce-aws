@@ -33,6 +33,7 @@ import {
   getOrderById,
   listOrders,
   listOrdersByCustomerUserId,
+  listZaloPayRefundOrders,
   markZaloPayRefundFailed,
   markZaloPayRefundPending,
   markZaloPayOrderPaid,
@@ -69,6 +70,7 @@ import type {
   OrderItem,
   OrderStatus,
   PaymentMethod,
+  RefundStatus,
   ShippingCarrier,
 } from "./types/order";
 
@@ -1147,6 +1149,54 @@ app.get("/admin/orders", async (req, res) => {
 
     return res.status(500).json({
       message: "Cannot get admin orders",
+    });
+  }
+});
+
+
+app.get("/admin/refunds", async (req, res) => {
+  try {
+    const rawStatus =
+      typeof req.query.status === "string"
+        ? req.query.status.trim().toUpperCase()
+        : "";
+
+    const validRefundStatuses: RefundStatus[] = [
+      "REQUESTING",
+      "PENDING",
+      "REFUNDED",
+      "FAILED",
+    ];
+
+    if (
+      rawStatus &&
+      rawStatus !== "ALL" &&
+      !validRefundStatuses.includes(rawStatus as RefundStatus)
+    ) {
+      return res.status(400).json({
+        message: "Trạng thái hoàn tiền không hợp lệ.",
+      });
+    }
+
+    const refundStatus =
+      rawStatus && rawStatus !== "ALL"
+        ? (rawStatus as RefundStatus)
+        : undefined;
+
+    const orders = await listZaloPayRefundOrders(refundStatus);
+
+    return res.json({
+      data: orders,
+      meta: {
+        status: refundStatus ?? "ALL",
+        total: orders.length,
+      },
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Không thể lấy danh sách hoàn tiền.",
     });
   }
 });

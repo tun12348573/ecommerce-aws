@@ -186,7 +186,14 @@ function AdminDashboardContent() {
           </Link>
 
           <Link
-            href="/admin/orders"
+            href="/admin/refunds/"
+            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+          >
+            Hoàn tiền
+          </Link>
+
+          <Link
+            href="/admin/orders/"
             className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700"
           >
             Đơn hàng

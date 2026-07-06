@@ -84,6 +84,20 @@ export async function listOrders(): Promise<Order[]> {
   });
 }
 
+export async function listZaloPayRefundOrders(
+  refundStatus?: RefundStatus
+): Promise<Order[]> {
+  const orders = await listOrders();
+
+  return orders.filter((order) => {
+    if (order.paymentMethod !== "ZALOPAY" || !order.refundStatus) {
+      return false;
+    }
+
+    return !refundStatus || order.refundStatus === refundStatus;
+  });
+}
+
 export async function listOrdersByCustomerUserId(
   customerUserId: string
 ): Promise<Order[]> {
