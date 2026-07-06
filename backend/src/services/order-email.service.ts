@@ -11,6 +11,7 @@ const sesClient = new SESv2Client({
 
 type EmailEventType =
   | "order_created"
+  | "payment_expired"
   | "payment_confirmed"
   | "shipping_updated"
   | "order_cancelled"
@@ -504,6 +505,57 @@ export async function sendOrderCancelledEmail(
     text,
     html,
     eventType: "order_cancelled",
+    orderId: order.orderId,
+  });
+}
+
+export async function sendZaloPayPaymentExpiredEmail(
+  order: Order
+): Promise<void> {
+  const subject = `AWS Shop | Đơn hàng hết hạn thanh toán ${order.orderId}`;
+
+  const text = [
+    `Xin chào ${order.customer.fullName},`,
+    "",
+    "Bạn chưa hoàn tất thanh toán ZaloPay trong thời gian cho phép.",
+    "Đơn hàng đã được tự động hủy và sản phẩm đã được hoàn lại kho.",
+    `Mã đơn hàng: ${order.orderId}`,
+    `Tổng tiền: ${formatMoney(order.total)}`,
+    `Thời gian hủy: ${formatDate(order.updatedAt)}`,
+  ].join("\n");
+
+  const html = createEmailHtml({
+    title: "Đơn hàng hết hạn thanh toán",
+    greeting: `Xin chào ${order.customer.fullName},`,
+    description:
+      "Bạn chưa hoàn tất thanh toán ZaloPay trong thời gian cho phép. Đơn hàng đã được tự động hủy và sản phẩm đã được hoàn lại kho.",
+    details: [
+      {
+        label: "Mã đơn hàng",
+        value: order.orderId,
+      },
+      {
+        label: "Tổng tiền",
+        value: formatMoney(order.total),
+      },
+      {
+        label: "Phương thức thanh toán",
+        value: "ZaloPay",
+      },
+      {
+        label: "Thời gian hủy",
+        value: formatDate(order.updatedAt),
+      },
+    ],
+    order,
+  });
+
+  await sendOrderEmail({
+    to: order.customer.email,
+    subject,
+    text,
+    html,
+    eventType: "payment_expired",
     orderId: order.orderId,
   });
 }

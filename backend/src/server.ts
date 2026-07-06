@@ -312,6 +312,18 @@ function parsePaymentMethod(value: unknown): PaymentMethod | null {
   return null;
 }
 
+function getZaloPayPaymentReservationMinutes(): number {
+  const value = Number(
+    process.env.ZALOPAY_PAYMENT_RESERVATION_MINUTES ?? "15"
+  );
+
+  if (!Number.isInteger(value) || value < 5 || value > 60) {
+    return 15;
+  }
+
+  return value;
+}
+
 async function createOrderFromCheckout(
   body: CreateOrderBody,
   authenticatedCustomer?: AuthenticatedCustomer
@@ -388,7 +400,17 @@ async function createOrderFromCheckout(
 
   const shippingFee = 30000;
   const discount = 0;
-  const now = new Date().toISOString();
+
+  const createdAt = new Date();
+  const now = createdAt.toISOString();
+
+  const zalopayPaymentExpiresAt =
+    paymentMethod === "ZALOPAY"
+      ? new Date(
+          createdAt.getTime() +
+            getZaloPayPaymentReservationMinutes() * 60 * 1000
+        ).toISOString()
+      : undefined;
 
   const order: Order = {
     orderId: `ord_${randomUUID()}`,
@@ -403,6 +425,14 @@ async function createOrderFromCheckout(
 
     paymentMethod,
     paymentStatus: "PENDING",
+
+    ...(paymentMethod === "ZALOPAY"
+      ? {
+          pendingPaymentStatus: "AWAITING_PAYMENT" as const,
+          zalopayPaymentExpiresAt,
+        }
+      : {}),
+
     orderStatus: "PROCESSING",
 
     statusHistory: [
@@ -719,7 +749,15 @@ app.post("/payments/zalopay/create", async (req, res) => {
     const existingExpiresAt = new Date(
       order.zalopayPaymentExpiresAt ?? ""
     ).getTime();
-
+    if (
+      !Number.isNaN(existingExpiresAt) &&
+      existingExpiresAt <= Date.now()
+    ) {
+      return res.status(409).json({
+        message:
+          "Phiên thanh toán ZaloPay đã hết hạn. Đơn hàng sẽ được tự động hủy và hoàn tồn kho.",
+      });
+    }
     if (
       order.zalopayOrderUrl &&
       !Number.isNaN(existingExpiresAt) &&
@@ -912,6 +950,13 @@ app.post("/payments/zalopay/query", async (req, res) => {
     if (order.paymentMethod !== "ZALOPAY") {
       return res.status(409).json({
         message: "Đơn hàng này không sử dụng ZaloPay.",
+      });
+    }
+
+    if (order.orderStatus === "CANCELLED") {
+      return res.status(409).json({
+        message:
+          "Đơn hàng đã hủy hoặc phiên thanh toán đã hết hạn.",
       });
     }
 

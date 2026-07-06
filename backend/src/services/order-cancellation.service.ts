@@ -140,9 +140,12 @@ export async function cancelOrderAndRestock(
               orderId: order.orderId,
             },
             UpdateExpression:
-              "SET #orderStatus = :cancelled, #updatedAt = :updatedAt, #statusHistory = list_append(if_not_exists(#statusHistory, :emptyHistory), :newStatusHistory)",
+              "SET #orderStatus = :cancelled, #updatedAt = :updatedAt, #statusHistory = list_append(if_not_exists(#statusHistory, :emptyHistory), :newStatusHistory) REMOVE #pendingPaymentStatus, #zalopayOrderUrl, #zalopayPaymentExpiresAt",
             ConditionExpression: `attribute_exists(orderId) AND ${allowedStatusCondition}`,
             ExpressionAttributeNames: {
+              "#pendingPaymentStatus": "pendingPaymentStatus",
+              "#zalopayOrderUrl": "zalopayOrderUrl",
+              "#zalopayPaymentExpiresAt": "zalopayPaymentExpiresAt",
               "#orderStatus": "orderStatus",
               "#updatedAt": "updatedAt",
               "#statusHistory": "statusHistory",
@@ -177,4 +180,99 @@ export async function cancelOrderAndRestock(
       ],
     })
   );
+}
+export async function expireZaloPayOrderAndRestock(
+  order: Order
+): Promise<Order> {
+  if (!order.orderId?.trim()) {
+    throw new OrderCancellationError("Mã đơn hàng không hợp lệ.");
+  }
+
+  const ordersTableName = getRequiredEnv("ORDERS_TABLE");
+  const productsTableName = getRequiredEnv("PRODUCTS_TABLE");
+  const productQuantities = getProductQuantities(order);
+
+  if (productQuantities.size + 1 > 100) {
+    throw new OrderCancellationError(
+      "Đơn hàng có quá nhiều sản phẩm để xử lý trong một giao dịch."
+    );
+  }
+
+  const updatedAt = new Date().toISOString();
+
+  const historyItem: OrderStatusHistoryItem = {
+    status: "CANCELLED",
+    changedAt: updatedAt,
+  };
+
+  await documentClient.send(
+    new TransactWriteCommand({
+      TransactItems: [
+        {
+          Update: {
+            TableName: ordersTableName,
+            Key: {
+              orderId: order.orderId,
+            },
+            UpdateExpression:
+              "SET #orderStatus = :cancelled, #updatedAt = :updatedAt, #statusHistory = list_append(if_not_exists(#statusHistory, :emptyHistory), :newStatusHistory) REMOVE #pendingPaymentStatus, #zalopayOrderUrl, #zalopayPaymentExpiresAt",
+            ConditionExpression:
+              "attribute_exists(orderId) AND #orderStatus = :processing AND #paymentMethod = :zalopay AND #paymentStatus = :pending AND #pendingPaymentStatus = :awaitingPayment AND #zalopayPaymentExpiresAt <= :updatedAt",
+            ExpressionAttributeNames: {
+              "#orderStatus": "orderStatus",
+              "#updatedAt": "updatedAt",
+              "#statusHistory": "statusHistory",
+              "#paymentMethod": "paymentMethod",
+              "#paymentStatus": "paymentStatus",
+              "#pendingPaymentStatus": "pendingPaymentStatus",
+              "#zalopayOrderUrl": "zalopayOrderUrl",
+              "#zalopayPaymentExpiresAt": "zalopayPaymentExpiresAt",
+            },
+            ExpressionAttributeValues: {
+              ":cancelled": "CANCELLED",
+              ":processing": "PROCESSING",
+              ":zalopay": "ZALOPAY",
+              ":pending": "PENDING",
+              ":awaitingPayment": "AWAITING_PAYMENT",
+              ":updatedAt": updatedAt,
+              ":emptyHistory": [],
+              ":newStatusHistory": [historyItem],
+            },
+          },
+        },
+
+        ...Array.from(productQuantities.entries()).map(
+          ([productId, quantity]) => ({
+            Update: {
+              TableName: productsTableName,
+              Key: {
+                productId,
+              },
+              UpdateExpression:
+                "SET stock = stock + :quantity, updatedAt = :updatedAt",
+              ConditionExpression: "attribute_exists(productId)",
+              ExpressionAttributeValues: {
+                ":quantity": quantity,
+                ":updatedAt": updatedAt,
+              },
+            },
+          })
+        ),
+      ],
+    })
+  );
+
+  const {
+    pendingPaymentStatus: _pendingPaymentStatus,
+    zalopayOrderUrl: _zalopayOrderUrl,
+    zalopayPaymentExpiresAt: _zalopayPaymentExpiresAt,
+    ...expiredOrder
+  } = order;
+
+  return {
+    ...expiredOrder,
+    orderStatus: "CANCELLED",
+    updatedAt,
+    statusHistory: [...(order.statusHistory ?? []), historyItem],
+  };
 }

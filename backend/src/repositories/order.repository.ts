@@ -80,6 +80,7 @@ type RecordZaloPayRefundCheckInput = {
 
 const ORDERS_BY_CUSTOMER_INDEX = "OrdersByCustomerIndex";
 const REFUNDS_BY_STATUS_INDEX = "RefundsByStatusIndex";
+const PENDING_PAYMENT_BY_EXPIRY_INDEX = "PendingPaymentByExpiryIndex";
 
 const REFUND_STATUSES: RefundStatus[] = [
   "REQUESTING",
@@ -155,6 +156,38 @@ async function queryRefundOrdersByStatus(
   } while (exclusiveStartKey);
 
   return orders;
+}
+
+export async function listExpiredZaloPayPaymentOrders(input: {
+  expiresBefore: string;
+  limit: number;
+}): Promise<Order[]> {
+  const requestedLimit = Number.isInteger(input.limit)
+    ? input.limit
+    : 20;
+
+  const safeLimit = Math.min(Math.max(requestedLimit, 1), 50);
+
+  const result = await docClient.send(
+    new QueryCommand({
+      TableName: getOrdersTableName(),
+      IndexName: PENDING_PAYMENT_BY_EXPIRY_INDEX,
+      KeyConditionExpression:
+        "#pendingPaymentStatus = :awaitingPayment AND #expiresAt <= :expiresBefore",
+      ExpressionAttributeNames: {
+        "#pendingPaymentStatus": "pendingPaymentStatus",
+        "#expiresAt": "zalopayPaymentExpiresAt",
+      },
+      ExpressionAttributeValues: {
+        ":awaitingPayment": "AWAITING_PAYMENT",
+        ":expiresBefore": input.expiresBefore,
+      },
+      ScanIndexForward: true,
+      Limit: safeLimit,
+    })
+  );
+
+  return (result.Items ?? []) as Order[];
 }
 
 export async function listOrders(): Promise<Order[]> {
@@ -334,24 +367,28 @@ export async function saveZaloPayPaymentSession(
         orderId: input.orderId,
       },
       UpdateExpression:
-        "SET #zalopayAppTransId = :appTransId, #zalopayOrderUrl = :orderUrl, #zalopayPaymentExpiresAt = :expiresAt, #updatedAt = :updatedAt",
+        "SET #pendingPaymentStatus = :awaitingPayment, #zalopayAppTransId = :appTransId, #zalopayOrderUrl = :orderUrl, #zalopayPaymentExpiresAt = :expiresAt, #updatedAt = :updatedAt",
       ConditionExpression:
-        "attribute_exists(orderId) AND #paymentMethod = :paymentMethod AND #paymentStatus = :paymentStatus AND attribute_not_exists(#zalopayAppTransId)",
+        "attribute_exists(orderId) AND #paymentMethod = :paymentMethod AND #paymentStatus = :paymentStatus AND #orderStatus = :processing AND attribute_not_exists(#zalopayAppTransId) AND (attribute_not_exists(#pendingPaymentStatus) OR #pendingPaymentStatus = :awaitingPayment) AND (attribute_not_exists(#zalopayPaymentExpiresAt) OR #zalopayPaymentExpiresAt > :updatedAt)",
       ExpressionAttributeNames: {
+        "#pendingPaymentStatus": "pendingPaymentStatus",
         "#paymentMethod": "paymentMethod",
         "#paymentStatus": "paymentStatus",
+        "#orderStatus": "orderStatus",
         "#zalopayAppTransId": "zalopayAppTransId",
         "#zalopayOrderUrl": "zalopayOrderUrl",
         "#zalopayPaymentExpiresAt": "zalopayPaymentExpiresAt",
         "#updatedAt": "updatedAt",
       },
       ExpressionAttributeValues: {
+        ":awaitingPayment": "AWAITING_PAYMENT",
         ":appTransId": input.appTransId,
         ":orderUrl": input.orderUrl,
         ":expiresAt": input.expiresAt,
         ":updatedAt": updatedAt,
         ":paymentMethod": "ZALOPAY",
         ":paymentStatus": "PENDING",
+        ":processing": "PROCESSING",
       },
       ReturnValues: "ALL_NEW",
     })
@@ -370,15 +407,17 @@ export async function markZaloPayOrderPaid(
         orderId: input.orderId,
       },
       UpdateExpression:
-        "SET #paymentStatus = :paid, #paymentTransactionId = :transactionId, #paidAt = :paidAt, #updatedAt = :updatedAt REMOVE #zalopayOrderUrl, #zalopayPaymentExpiresAt",
+        "SET #paymentStatus = :paid, #paymentTransactionId = :transactionId, #paidAt = :paidAt, #updatedAt = :updatedAt REMOVE #pendingPaymentStatus, #zalopayOrderUrl, #zalopayPaymentExpiresAt",
       ConditionExpression:
-        "attribute_exists(orderId) AND #paymentMethod = :paymentMethod AND #paymentStatus = :pending AND #zalopayAppTransId = :appTransId AND #total = :amount",
+        "attribute_exists(orderId) AND #paymentMethod = :paymentMethod AND #paymentStatus = :pending AND #orderStatus = :processing AND #zalopayAppTransId = :appTransId AND #total = :amount AND (attribute_not_exists(#pendingPaymentStatus) OR #pendingPaymentStatus = :awaitingPayment) AND (attribute_not_exists(#zalopayPaymentExpiresAt) OR #zalopayPaymentExpiresAt > :paidAt)",
       ExpressionAttributeNames: {
         "#paymentMethod": "paymentMethod",
         "#paymentStatus": "paymentStatus",
+        "#orderStatus": "orderStatus",
         "#paymentTransactionId": "paymentTransactionId",
         "#paidAt": "paidAt",
         "#updatedAt": "updatedAt",
+        "#pendingPaymentStatus": "pendingPaymentStatus",
         "#zalopayAppTransId": "zalopayAppTransId",
         "#zalopayOrderUrl": "zalopayOrderUrl",
         "#zalopayPaymentExpiresAt": "zalopayPaymentExpiresAt",
@@ -388,6 +427,8 @@ export async function markZaloPayOrderPaid(
         ":paymentMethod": "ZALOPAY",
         ":pending": "PENDING",
         ":paid": "PAID",
+        ":processing": "PROCESSING",
+        ":awaitingPayment": "AWAITING_PAYMENT",
         ":appTransId": input.appTransId,
         ":amount": input.amount,
         ":transactionId": input.transactionId,

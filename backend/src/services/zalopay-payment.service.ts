@@ -17,7 +17,19 @@ const ZALOPAY_SANDBOX_CREATE_URL =
 const ZALOPAY_SANDBOX_QUERY_URL =
   "https://sb-openapi.zalopay.vn/v2/query";
 
-const PAYMENT_EXPIRE_SECONDS = 15 * 60;
+const DEFAULT_PAYMENT_EXPIRE_SECONDS = 15 * 60;
+
+function getPaymentExpireSeconds(): number {
+  const minutes = Number(
+    process.env.ZALOPAY_PAYMENT_RESERVATION_MINUTES ?? "15"
+  );
+
+  if (!Number.isInteger(minutes) || minutes < 5 || minutes > 60) {
+    return DEFAULT_PAYMENT_EXPIRE_SECONDS;
+  }
+
+  return minutes * 60;
+}
 
 type ZaloPayCredentials = {
   appId: number;
@@ -205,6 +217,7 @@ export async function createZaloPayOrder(
 
   const appTransId = createZaloPayAppTransId(order.orderId);
   const appTime = Date.now();
+  const paymentExpireSeconds = getPaymentExpireSeconds();
 
   const redirectUrl = new URL(getRequiredEnv("ZALOPAY_REDIRECT_URL"));
 
@@ -247,7 +260,7 @@ export async function createZaloPayOrder(
       app_user: order.orderId,
       app_trans_id: appTransId,
       app_time: appTime,
-      expire_duration_seconds: PAYMENT_EXPIRE_SECONDS,
+      expire_duration_seconds: paymentExpireSeconds,
       amount: order.total,
       description: `Thanh toan don ${order.orderId}`,
       callback_url: getRequiredEnv("ZALOPAY_CALLBACK_URL"),
@@ -275,7 +288,7 @@ export async function createZaloPayOrder(
     appTransId,
     orderUrl: payload.order_url,
     expiresAt: new Date(
-      appTime + PAYMENT_EXPIRE_SECONDS * 1000
+      appTime + paymentExpireSeconds * 1000
     ).toISOString(),
   };
 }

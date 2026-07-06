@@ -207,6 +207,7 @@ Resources:
           PRODUCT_IMAGES_BUCKET: !Ref FrontendBucket
           PRODUCT_IMAGES_BASE_URL: !Sub "https://${FrontendDistribution.DomainName}"
           ZALOPAY_SECRET_ID: ecommerce-aws/zalopay/sandbox
+          ZALOPAY_PAYMENT_RESERVATION_MINUTES: "15"
           ZALOPAY_CALLBACK_URL: "https://89yap0gq5k.execute-api.ap-southeast-1.amazonaws.com/prod/payments/zalopay/callback"
           ZALOPAY_REDIRECT_URL: !Sub "https://${FrontendDistribution.DomainName}/checkout/success/"
 
@@ -360,6 +361,80 @@ Resources:
       BuildProperties:
         EntryPoints:
           - src/refund-scheduler.ts
+        Target: es2020
+        Format: cjs
+        Sourcemap: true
+        Minify: false
+
+  PaymentExpirySchedulerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend/
+      Handler: src/payment-expiry-scheduler.handler
+      Runtime: nodejs22.x
+
+      Architectures:
+        - arm64
+
+      MemorySize: 256
+      Timeout: 60
+
+      EventInvokeConfig:
+        MaximumEventAgeInSeconds: 3600
+        MaximumRetryAttempts: 2
+
+      Environment:
+        Variables:
+          SES_FROM_EMAIL: thinhdaongoc1@gmail.com
+          PRODUCTS_TABLE: !Ref ProductsTableName
+          ORDERS_TABLE: !Ref OrdersTableName
+          ZALOPAY_SECRET_ID: ecommerce-aws/zalopay/sandbox
+          PAYMENT_EXPIRY_RECONCILIATION_BATCH_SIZE: 20
+
+      Policies:
+        - Statement:
+            Effect: Allow
+            Action:
+              - dynamodb:GetItem
+              - dynamodb:Query
+              - dynamodb:UpdateItem
+              - dynamodb:TransactWriteItems
+            Resource:
+              - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ProductsTableName}"
+              - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${OrdersTableName}"
+              - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${OrdersTableName}/index/*"
+
+        - Statement:
+            Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource: !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:ecommerce-aws/zalopay/sandbox-*"
+
+        - Statement:
+            Effect: Allow
+            Action:
+              - ses:SendEmail
+            Resource: !Sub "arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/thinhdaongoc1@gmail.com"
+
+      Events:
+        PaymentExpirySchedule:
+          Type: ScheduleV2
+          Properties:
+            Name: !Sub "${AWS::StackName}-payment-expiry"
+            Description: Tự động hủy đơn ZaloPay hết hạn và hoàn tồn kho.
+            ScheduleExpression: "rate(5 minutes)"
+            FlexibleTimeWindow:
+              Mode: "OFF"
+            State: ENABLED
+            RetryPolicy:
+              MaximumEventAgeInSeconds: 3600
+              MaximumRetryAttempts: 3
+
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+          - src/payment-expiry-scheduler.ts
         Target: es2020
         Format: cjs
         Sourcemap: true

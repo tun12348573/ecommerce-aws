@@ -2,6 +2,8 @@ export type PaymentMethod = "COD" | "BANK_TRANSFER" | "ZALOPAY";
 
 export type PaymentStatus = "PENDING" | "PAID";
 
+export type PendingPaymentStatus = "AWAITING_PAYMENT";
+
 export type RefundStatus =
   | "REQUESTING"
   | "PENDING"
@@ -65,6 +67,7 @@ export type Order = {
 
   paymentTransactionId?: string;
   paidAt?: string;
+  pendingPaymentStatus?: PendingPaymentStatus;
 
   zalopayAppTransId?: string;
   zalopayOrderUrl?: string;
