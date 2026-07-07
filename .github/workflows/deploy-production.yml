@@ -98,7 +98,6 @@ jobs:
     name: Verify AWS OIDC access
     needs: verify
     runs-on: ubuntu-latest
-    environment: production
 
     steps:
       - name: Configure temporary AWS credentials through OIDC
@@ -118,7 +117,6 @@ jobs:
       - verify
       - oidc-smoke-test
     runs-on: ubuntu-latest
-    environment: production
 
     steps:
       - name: Checkout source
@@ -176,7 +174,6 @@ jobs:
       - verify
       - oidc-smoke-test
     runs-on: ubuntu-latest
-    environment: production
 
     steps:
       - name: Checkout source
