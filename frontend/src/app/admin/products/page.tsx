@@ -488,7 +488,7 @@ ECOMMERCE AWS ADMIN </p>
               setForm((currentForm) => ({
                 ...currentForm,
                 name: nextName,
-                slug: currentForm.slug || createSlug(nextName),
+                slug: createSlug(nextName),
               }));
             }}
             className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-slate-900"
