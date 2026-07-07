@@ -73,7 +73,6 @@ const objectKey = `uploads/products/${randomUUID()}.${extension}`;
 const uploadCommand = new PutObjectCommand({
 Bucket: bucketName,
 Key: objectKey,
-ContentType: contentType,
 });
 
 const expiresIn = 300;

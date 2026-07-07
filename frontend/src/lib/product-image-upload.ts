@@ -20,38 +20,47 @@ const supportedImageTypes = new Set([
 ]);
 
 export async function uploadProductImage(file: File): Promise<string> {
-if (!supportedImageTypes.has(file.type)) {
-throw new Error("Chỉ hỗ trợ ảnh JPG, PNG hoặc WEBP.");
-}
+  const contentType = file.type.trim().toLowerCase();
 
-if (file.size > MAX_IMAGE_SIZE_BYTES) {
-throw new Error("Ảnh phải nhỏ hơn hoặc bằng 5 MB.");
-}
+  if (!supportedImageTypes.has(contentType)) {
+    throw new Error("Chỉ hỗ trợ ảnh JPG, PNG hoặc WEBP.");
+  }
 
-const response = await adminPost<CreateProductImageUploadResponse,
-{
-fileName: string;
-contentType: string;
-}
+  if (file.size > MAX_IMAGE_SIZE_BYTES) {
+    throw new Error("Ảnh phải nhỏ hơn hoặc bằng 5 MB.");
+  }
 
->("/admin/uploads/product-image", {
-fileName: file.name,
-contentType: file.type,
-});
+  const response = await adminPost<
+    CreateProductImageUploadResponse,
+    {
+      fileName: string;
+      contentType: string;
+    }
+  >("/admin/uploads/product-image", {
+    fileName: file.name,
+    contentType,
+  });
 
-const uploadResponse = await fetch(response.data.uploadUrl, {
-method: "PUT",
-headers: {
-"Content-Type": file.type,
-},
-body: file,
-});
+  const uploadResponse = await fetch(response.data.uploadUrl, {
+    method: "PUT",
+    headers: {
+      "Content-Type": contentType,
+    },
+    body: file,
+  });
 
-if (!uploadResponse.ok) {
-throw new Error(
-`Upload ảnh thất bại. Mã phản hồi: ${uploadResponse.status}`
-);
-}
+  if (!uploadResponse.ok) {
+    const responseText = await uploadResponse.text();
 
-return response.data.imageUrl;
+    const s3ErrorCode =
+      responseText.match(/<Code>([^<]+)<\/Code>/)?.[1] ?? "";
+
+    throw new Error(
+      `Upload ảnh thất bại. Mã phản hồi: ${uploadResponse.status}${
+        s3ErrorCode ? ` (${s3ErrorCode})` : ""
+      }`
+    );
+  }
+
+  return response.data.imageUrl;
 }
