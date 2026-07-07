@@ -317,7 +317,7 @@ Resources:
           ORDERS_TABLE:
             Ref: OrdersTableName
           PRODUCT_IMAGES_BUCKET:
-            Ref: FrontendBucket
+            Ref: ProductImagesBucket
           PRODUCT_IMAGES_BASE_URL:
             Fn::Sub: https://${FrontendDistribution.DomainName}
           ZALOPAY_SECRET_ID: ecommerce-aws/zalopay/sandbox
@@ -781,7 +781,7 @@ Resources:
             Action:
               - s3:GetObject
 
-            Resource: !Sub "${ProductImagesBucket.Arn}/*"
+            Resource: !Sub "${ProductImagesBucket.Arn}/uploads/products/*"
 
             Condition:
               StringEquals:
@@ -895,6 +895,35 @@ Resources:
                 - Id
             S3OriginConfig:
               OriginAccessIdentity: ""
+          - Id: ProductImagesS3Origin
+            DomainName: !GetAtt ProductImagesBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt ProductImagesOriginAccessControl.Id
+
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+        CacheBehaviors:
+          - PathPattern: "uploads/*"
+            TargetOriginId: ProductImagesS3Origin
+            ViewerProtocolPolicy: redirect-to-https
+
+            AllowedMethods:
+              - GET
+              - HEAD
+              - OPTIONS
+
+            CachedMethods:
+              - GET
+              - HEAD
+
+            Compress: true
+
+            ResponseHeadersPolicyId: !Ref FrontendResponseHeadersPolicy
+
+            ForwardedValues:
+              QueryString: false
+
+              Cookies:
+                Forward: none
         DefaultCacheBehavior:
           TargetOriginId: FrontendS3Origin
           ViewerProtocolPolicy: redirect-to-https
