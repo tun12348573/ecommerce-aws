@@ -348,8 +348,7 @@ Resources:
             Effect: Allow
             Action:
               - s3:PutObject
-            Resource:
-              Fn::Sub: ${FrontendBucket.Arn}/uploads/products/*
+            Resource: !Sub "${ProductImagesBucket.Arn}/uploads/products/*"
         - Statement:
             Effect: Allow
             Action:
