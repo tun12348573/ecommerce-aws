@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "test:dynamodb": "ts-node-dev --transpile-only src/test-dynamodb.ts",
     "seed:products": "ts-node-dev --transpile-only src/seed-products.ts"
   },
@@ -32,6 +34,7 @@
     "@types/node": "^25.9.3",
     "esbuild": "^0.28.1",
     "ts-node-dev": "^2.0.0",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
   }
 }

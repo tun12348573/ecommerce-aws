@@ -43,6 +43,9 @@ jobs:
       - name: Build TypeScript
         run: npm run build
 
+      - name: Run backend tests
+        run: npm test
+
   frontend-build:
     name: Frontend Next.js build
     runs-on: ubuntu-latest
