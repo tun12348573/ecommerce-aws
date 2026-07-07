@@ -1,0 +1,35 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ListAndLocateFrontendBucket",
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket",
+        "s3:GetBucketLocation"
+      ],
+      "Resource": "arn:aws:s3:::ecommerce-aws-backend-frontendbucket-9wu7aid8okd8"
+    },
+    {
+      "Sid": "DeployFrontendObjects",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:AbortMultipartUpload",
+        "s3:ListMultipartUploadParts"
+      ],
+      "Resource": "arn:aws:s3:::ecommerce-aws-backend-frontendbucket-9wu7aid8okd8/*"
+    },
+    {
+      "Sid": "InvalidateOnlyThisDistribution",
+      "Effect": "Allow",
+      "Action": [
+        "cloudfront:CreateInvalidation",
+        "cloudfront:GetInvalidation"
+      ],
+      "Resource": "arn:aws:cloudfront::451626662985:distribution/E3EAY8XN54SSDX"
+    }
+  ]
+}

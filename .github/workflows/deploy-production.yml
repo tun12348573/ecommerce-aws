@@ -1,0 +1,235 @@
+name: Manual production deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Deployment target
+        required: true
+        default: verify
+        type: choice
+        options:
+          - verify
+          - backend
+          - frontend
+          - all
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: ecommerce-production-deploy
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-southeast-1
+  AWS_ROLE_TO_ASSUME: arn:aws:iam::451626662985:role/aws-sam-cli-managed-prod-pipe-PipelineExecutionRole-ukHaBPQvBHV9
+  CLOUDFORMATION_EXECUTION_ROLE_ARN: arn:aws:iam::451626662985:role/aws-sam-cli-managed-prod--CloudFormationExecutionRo-6gNs2FUYuR5R
+  SAM_ARTIFACTS_BUCKET: aws-sam-cli-managed-prod-pipeline--artifactsbucket-wxawrlngpfh8
+  SAM_STACK_NAME: ecommerce-aws-backend
+  PRODUCTS_TABLE_NAME: EcommerceProducts
+  ORDERS_TABLE_NAME: EcommerceOrders
+  FRONTEND_BUCKET: ecommerce-aws-backend-frontendbucket-9wu7aid8okd8
+  CLOUDFRONT_DISTRIBUTION_ID: E3EAY8XN54SSDX
+
+jobs:
+  verify:
+    name: Verify before deployment
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Build and test backend
+        working-directory: backend
+        run: |
+          npm run build
+          npm test
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend static export
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
+          NEXT_PUBLIC_COGNITO_REGION: ${{ vars.NEXT_PUBLIC_COGNITO_REGION }}
+          NEXT_PUBLIC_COGNITO_CLIENT_ID: ${{ vars.NEXT_PUBLIC_COGNITO_CLIENT_ID }}
+          NEXT_PUBLIC_CUSTOMER_COGNITO_REGION: ${{ vars.NEXT_PUBLIC_CUSTOMER_COGNITO_REGION }}
+          NEXT_PUBLIC_CUSTOMER_COGNITO_CLIENT_ID: ${{ vars.NEXT_PUBLIC_CUSTOMER_COGNITO_CLIENT_ID }}
+        run: npm run build
+
+      - name: Install esbuild for AWS SAM
+        run: npm install --global esbuild@0.28.1
+
+      - name: Set up AWS SAM CLI
+        uses: aws-actions/setup-sam@v3
+        with:
+          use-installer: true
+          token: ${{ github.token }}
+
+      - name: Validate and build SAM application
+        working-directory: infrastructure
+        env:
+          AWS_DEFAULT_REGION: ${{ env.AWS_REGION }}
+        run: |
+          sam validate --template-file template.yaml --region "$AWS_REGION"
+          sam build --template-file template.yaml
+
+  oidc-smoke-test:
+    name: Verify AWS OIDC access
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Configure temporary AWS credentials through OIDC
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: ecommerce-github-actions-oidc-check
+
+      - name: Confirm assumed AWS identity
+        run: aws sts get-caller-identity
+
+  deploy-backend:
+    name: Deploy backend with SAM
+    if: ${{ inputs.target == 'backend' || inputs.target == 'all' }}
+    needs:
+      - verify
+      - oidc-smoke-test
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install esbuild for AWS SAM
+        run: npm install --global esbuild@0.28.1
+
+      - name: Set up AWS SAM CLI
+        uses: aws-actions/setup-sam@v3
+        with:
+          use-installer: true
+          token: ${{ github.token }}
+
+      - name: Configure temporary AWS credentials through OIDC
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: ecommerce-github-actions-backend-deploy
+
+      - name: Build SAM application
+        working-directory: infrastructure
+        run: sam build --template-file template.yaml
+
+      - name: Deploy CloudFormation stack
+        working-directory: infrastructure
+        run: |
+          sam deploy \
+            --template-file .aws-sam/build/template.yaml \
+            --stack-name "$SAM_STACK_NAME" \
+            --region "$AWS_REGION" \
+            --s3-bucket "$SAM_ARTIFACTS_BUCKET" \
+            --role-arn "$CLOUDFORMATION_EXECUTION_ROLE_ARN" \
+            --capabilities CAPABILITY_IAM \
+            --parameter-overrides \
+              ProductsTableName="$PRODUCTS_TABLE_NAME" \
+              OrdersTableName="$ORDERS_TABLE_NAME" \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset
+
+  deploy-frontend:
+    name: Deploy frontend to S3 and CloudFront
+    if: ${{ inputs.target == 'frontend' || inputs.target == 'all' }}
+    needs:
+      - verify
+      - oidc-smoke-test
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend static export
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
+          NEXT_PUBLIC_COGNITO_REGION: ${{ vars.NEXT_PUBLIC_COGNITO_REGION }}
+          NEXT_PUBLIC_COGNITO_CLIENT_ID: ${{ vars.NEXT_PUBLIC_COGNITO_CLIENT_ID }}
+          NEXT_PUBLIC_CUSTOMER_COGNITO_REGION: ${{ vars.NEXT_PUBLIC_CUSTOMER_COGNITO_REGION }}
+          NEXT_PUBLIC_CUSTOMER_COGNITO_CLIENT_ID: ${{ vars.NEXT_PUBLIC_CUSTOMER_COGNITO_CLIENT_ID }}
+        run: npm run build
+
+      - name: Configure temporary AWS credentials through OIDC
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: ecommerce-github-actions-frontend-deploy
+
+      - name: Sync static site to S3
+        run: aws s3 sync frontend/out/ "s3://$FRONTEND_BUCKET" --delete
+
+      - name: Invalidate CloudFront cache
+        id: invalidate
+        run: |
+          invalidation_id=$(aws cloudfront create-invalidation \
+            --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" \
+            --paths "/*" \
+            --query 'Invalidation.Id' \
+            --output text)
+
+          echo "invalidation_id=$invalidation_id" >> "$GITHUB_OUTPUT"
+          aws cloudfront wait invalidation-completed \
+            --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" \
+            --id "$invalidation_id"
+
+      - name: Show deployment result
+        run: |
+          echo "Frontend deployed to s3://$FRONTEND_BUCKET"
+          echo "CloudFront invalidation completed: ${{ steps.invalidate.outputs.invalidation_id }}"
