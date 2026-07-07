@@ -714,6 +714,78 @@ Resources:
         - Ref: OperationsAlertTopic
     Metadata:
       SamResourceId: RefundSchedulerTargetErrorsAlarm
+
+  ProductImagesBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins:
+              - http://localhost:3000
+              - http://127.0.0.1:3000
+              - https://dfjng6e5jz4mf.cloudfront.net
+            AllowedMethods:
+              - PUT
+            AllowedHeaders:
+              - "*"
+            ExposedHeaders:
+              - ETag
+            MaxAge: 3000
+
+  ProductImagesOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "${AWS::StackName}-product-images-oac"
+        Description: CloudFront access control for private product images bucket
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  ProductImagesBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ProductImagesBucket
+
+      PolicyDocument:
+        Version: "2012-10-17"
+
+        Statement:
+          - Sid: AllowCloudFrontReadOnly
+
+            Effect: Allow
+
+            Principal:
+              Service: cloudfront.amazonaws.com
+
+            Action:
+              - s3:GetObject
+
+            Resource: !Sub "${ProductImagesBucket.Arn}/*"
+
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${FrontendDistribution}"
   FrontendBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Retain
@@ -907,6 +979,9 @@ Outputs:
     Description: Private S3 bucket storing the static frontend files
     Value:
       Ref: FrontendBucket
+  ProductImagesBucketName:
+    Description: Private S3 bucket storing product uploads
+    Value: !Ref ProductImagesBucket
   FrontendDistributionId:
     Description: CloudFront distribution ID for the frontend
     Value:
