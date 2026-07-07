@@ -105,6 +105,7 @@ jobs:
         with:
           role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
           role-session-name: ecommerce-github-actions-oidc-check
 
       - name: Confirm assumed AWS identity
@@ -145,6 +146,7 @@ jobs:
         with:
           role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
           role-session-name: ecommerce-github-actions-backend-deploy
 
       - name: Build SAM application
@@ -207,6 +209,7 @@ jobs:
         with:
           role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
           role-session-name: ecommerce-github-actions-frontend-deploy
 
       - name: Sync static site to S3
